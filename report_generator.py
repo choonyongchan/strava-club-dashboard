@@ -11,7 +11,8 @@ def period_timestamps(mode: str = "week") -> tuple:
     now = datetime.now(timezone.utc)
     monday = (now - timedelta(days=now.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0)
-    label = f"{monday.strftime('%-d.%-m')} – {now.strftime('%-d.%-m.%Y')}"
+
+    label = f"{monday.day}.{monday.month} – {now.day}.{now.month}.{now.year}"
     return int(monday.timestamp()), label
 
 
