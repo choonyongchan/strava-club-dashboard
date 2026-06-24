@@ -78,13 +78,6 @@ def now_label() -> tuple:
 _TZ8 = timezone(timedelta(hours=8))
 
 
-def _current_sunday_ts() -> int:
-    """Unix timestamp of the most recent Sunday 00:00 UTC+8."""
-    now = datetime.now(_TZ8)
-    days_back = (now.weekday() + 1) % 7
-    sunday = (now - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return int(sunday.timestamp())
-
 
 def week_label_for_id(week_id: str) -> str:
     year, wnum = int(week_id[:4]), int(week_id[6:])
@@ -474,6 +467,7 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
       <button class="tab active" onclick="showMode('week')" id="btn-week">This Week</button>
       <button class="tab" onclick="showPrevWeek()" id="btn-7days" style="display:none">Last Week</button>
       <button class="tab" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
+      <div id="daily-tabs" style="display:inline-flex;gap:4px"></div>
       <div class="history-wrap" id="history-wrap" style="display:none">
         <button class="tab" onclick="toggleHistoryPicker(event)" id="btn-history">📅 History</button>
         <div class="history-picker" id="history-picker">
@@ -543,6 +537,7 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
 <script>
 const DATA = __DATA__;
 const HISTORY = __HISTORY_DATA__;
+const DAILY   = __DAILY_DATA__;
 const PREV_WEEK_ID = '__PREV_WEEK_ID__';
 const MEDALS = ['🥇','🥈','🥉'];
 const AWARDS = [
@@ -573,6 +568,7 @@ function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.
 let currentSort        = { key: 'km', dir: -1 };
 let currentHistoryWeek = null;
 let cumulativeMode     = false;
+let currentDailyDate   = null;
 
 function fmtTime(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -624,7 +620,8 @@ function buildCumulative() {
 }
 
 function d() {
-  if (cumulativeMode) return buildCumulative();
+  if (currentDailyDate)  return DAILY[currentDailyDate]['all'];
+  if (cumulativeMode)    return buildCumulative();
   if (currentHistoryWeek) return HISTORY[currentHistoryWeek]['all'];
   return DATA['week']['all'];
 }
@@ -670,7 +667,9 @@ function sortedLeaderboard(rows) {
 
 function render() {
   const data = d();
-  if (cumulativeMode) {
+  if (currentDailyDate) {
+    document.getElementById('period-label').textContent = DAILY[currentDailyDate].label;
+  } else if (cumulativeMode) {
     document.getElementById('period-label').textContent = `Cumulative · Week of ${sundayOfWeek('__CURRENT_WEEK_ID__')}`;
   } else if (currentHistoryWeek) {
     document.getElementById('period-label').textContent = data.label;
@@ -790,6 +789,13 @@ function render() {
   });
   document.getElementById('history-picker-list').innerHTML = pickerHtml;
 
+  // Daily snapshot tabs (descending order, right of Leaderboard button)
+  const dailyKeys = Object.keys(DAILY).sort().reverse();
+  document.getElementById('daily-tabs').innerHTML = dailyKeys.map(date => {
+    const isActive = date === currentDailyDate;
+    return `<button class="tab${isActive ? ' active' : ''}" onclick="showDailySnapshot('${date}')">${DAILY[date].label}</button>`;
+  }).join('');
+
   renderLeaderboard(data);
 }
 
@@ -903,6 +909,28 @@ def load_history() -> dict:
     return result
 
 
+def save_daily_snapshot(date_str: str, label: str, week_data: dict):
+    daily_dir = Path(__file__).parent / "dashboard" / "history" / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"date": date_str, "label": label, "all": week_data["all"]}
+    (daily_dir / f"{date_str}.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def load_daily_snapshots() -> dict:
+    daily_dir = Path(__file__).parent / "dashboard" / "history" / "daily"
+    if not daily_dir.exists():
+        return {}
+    result = {}
+    for f in sorted(daily_dir.glob("*.json")):
+        try:
+            obj = json.loads(f.read_text(encoding="utf-8"))
+            result[obj["date"]] = obj
+        except Exception:
+            pass
+    return result
+
+
 def make_json_safe(stats: dict) -> dict:
     """Convert stats dict to JSON-serializable object (handle NaN/Inf)."""
     def fix(obj):
@@ -925,16 +953,18 @@ def generate():
     week_id = get_week_id()
     history = load_history()
 
-    if history:
-        after_ts = _current_sunday_ts()
-        print(f"  Fetching activities after {after_ts} (current week)...")
-    else:
-        after_ts = None
-        print("  First run — fetching all activities from club start...")
-    activities = strava_client.fetch_club_activities(token, after=after_ts)
+    print("  Fetching all club activities...")
+    activities = strava_client.fetch_club_activities(token)
 
     label = week_label_for_id(week_id)
-    save_week_history(week_id, label, build_week_data(activities, members, label))
+    week_data = build_week_data(activities, members, label)
+    save_week_history(week_id, label, week_data)
+
+    today = datetime.now(_TZ8)
+    date_str = today.strftime("%Y-%m-%d")
+    date_label = f"{today.day}.{today.month}.{today.year}"
+    save_daily_snapshot(date_str, date_label, week_data)
+    daily_snapshots = load_daily_snapshots()
 
     history = load_history()
     # exclude current week from history tabs (it's shown as live)
@@ -965,6 +995,7 @@ def generate():
     html = TEMPLATE
     html = html.replace("__DATA__", json.dumps(data, ensure_ascii=False))
     html = html.replace("__HISTORY_DATA__", json.dumps(history_past, ensure_ascii=False))
+    html = html.replace("__DAILY_DATA__", json.dumps(daily_snapshots, ensure_ascii=False))
     html = html.replace("__CURRENT_WEEK_ID__", week_id)
     html = html.replace("__PREV_WEEK_ID__", prev_week_id)
     html = html.replace("__UPDATED_HUMAN__", human_label)
