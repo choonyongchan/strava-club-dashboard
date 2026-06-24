@@ -464,9 +464,9 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
 
   <div class="controls-row">
     <div class="toggle">
+      <button class="tab" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
       <button class="tab active" onclick="showMode('week')" id="btn-week">This Week</button>
       <button class="tab" onclick="showPrevWeek()" id="btn-7days" style="display:none">Last Week</button>
-      <button class="tab" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
       <div id="daily-tabs" style="display:inline-flex;gap:4px"></div>
       <div class="history-wrap" id="history-wrap" style="display:none">
         <button class="tab" onclick="toggleHistoryPicker(event)" id="btn-history">📅 History</button>
@@ -820,6 +820,7 @@ function renderLeaderboard(data) {
 function showMode(mode) {
   cumulativeMode = false;
   currentHistoryWeek = null;
+  currentDailyDate = null;
   document.getElementById('btn-week').classList.toggle('active', mode==='week');
   document.getElementById('btn-7days').classList.remove('active');
   document.getElementById('btn-history').classList.remove('active');
@@ -831,6 +832,7 @@ function showPrevWeek() {
   if (!PREV_WEEK_ID) return;
   cumulativeMode = false;
   currentHistoryWeek = PREV_WEEK_ID;
+  currentDailyDate = null;
   document.getElementById('btn-week').classList.remove('active');
   document.getElementById('btn-7days').classList.add('active');
   document.getElementById('btn-history').classList.remove('active');
@@ -841,6 +843,7 @@ function showPrevWeek() {
 function showHistoryWeek(weekId) {
   cumulativeMode = false;
   currentHistoryWeek = weekId;
+  currentDailyDate = null;
   closeHistoryPicker();
   const isPrevWeek = weekId === PREV_WEEK_ID;
   document.getElementById('btn-week').classList.remove('active');
@@ -853,10 +856,22 @@ function showHistoryWeek(weekId) {
 function showLeaderboard() {
   cumulativeMode = true;
   currentHistoryWeek = null;
+  currentDailyDate = null;
   document.getElementById('btn-week').classList.remove('active');
   document.getElementById('btn-7days').classList.remove('active');
   document.getElementById('btn-history').classList.remove('active');
   document.getElementById('btn-leaderboard').classList.add('active');
+  render();
+}
+
+function showDailySnapshot(date) {
+  currentDailyDate = date;
+  cumulativeMode = false;
+  currentHistoryWeek = null;
+  document.getElementById('btn-week').classList.remove('active');
+  document.getElementById('btn-7days').classList.remove('active');
+  document.getElementById('btn-history').classList.remove('active');
+  document.getElementById('btn-leaderboard').classList.remove('active');
   render();
 }
 
