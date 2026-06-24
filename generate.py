@@ -917,6 +917,7 @@ function setFilter(f) {
   render();
 }
 
+document.getElementById('btn-week').textContent = 'Week of ' + sundayOfWeek('__CURRENT_WEEK_ID__');
 render();
 </script>
 </body>
