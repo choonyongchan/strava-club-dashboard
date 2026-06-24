@@ -8,7 +8,6 @@ Usage:
 import os, json, math
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -77,73 +76,34 @@ def now_label() -> tuple:
 # ---------------------------------------------------------------------------
 
 _TZ8 = timezone(timedelta(hours=8))
-_CHECKPOINT_PATH = Path(__file__).parent / "dashboard" / "history" / ".checkpoint"
 
 
 def _current_sunday_ts() -> int:
     """Unix timestamp of the most recent Sunday 00:00 UTC+8."""
     now = datetime.now(_TZ8)
-    days_back = (now.weekday() + 1) % 7  # Mon=0..Sun=6 → Sun=0 days back
+    days_back = (now.weekday() + 1) % 7
     sunday = (now - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
     return int(sunday.timestamp())
 
 
-def activity_week_id(act: dict) -> str:
-    """Return the dashboard week ID for an activity.
-
-    Dashboard weeks run Sun–Sat; ISO weeks run Mon–Sun.
-    Adding 1 day before calling isocalendar() maps Sunday → next ISO week,
-    matching the convention used by get_week_id().
-    """
-    start = act.get("start_date", "")
-    if not start:
-        return ""
-    dt_utc = datetime.fromisoformat(start.replace("Z", "+00:00"))
-    dt_local = dt_utc.astimezone(_TZ8)
-    iso = (dt_local + timedelta(days=1)).isocalendar()
-    return f"{iso[0]}-W{iso[1]:02d}"
-
-
 def week_label_for_id(week_id: str) -> str:
-    """Human-readable date range for a week ID (e.g. '21.6 – 27.6.2026')."""
-    year, wnum = int(week_id[:4]), int(week_id[5:])
-    # Monday of ISO week wnum
+    year, wnum = int(week_id[:4]), int(week_id[6:])
     jan4 = datetime(year, 1, 4, tzinfo=_TZ8)
     monday = jan4 - timedelta(days=jan4.weekday()) + timedelta(weeks=wnum - 1)
-    sunday = monday - timedelta(days=1)  # week start (Sun)
-    now = datetime.now(_TZ8)
-    current_week_id = get_week_id()
-    end = now if week_id == current_week_id else monday + timedelta(days=5)  # Sat
-    return f"{sunday.day}.{sunday.month} – {end.day}.{end.month}.{end.year}"
+    sunday = monday - timedelta(days=1)  # week starts on Sunday
+    if week_id == get_week_id():
+        now = datetime.now(_TZ8)
+        return f"{sunday.day}.{sunday.month} – {now.day}.{now.month}.{now.year}"
+    return f"Week of {sunday.day}.{sunday.month}.{sunday.year}"
 
 
 def build_week_data(acts: list, members: list, label: str) -> dict:
-    """Return {all, outdoor, indoor} stats dict for a list of activities."""
-    def is_indoor(act):
-        return act.get("type") in ("VirtualRide", "IndoorCycling") or act.get("trainer") is True
-
     def build(a):
         s = report_generator.compute_stats(a, members=members)
         s["label"] = label
         s["count"] = len(a)
         return make_json_safe(s)
-
-    outdoor = [a for a in acts if not is_indoor(a)]
-    indoor  = [a for a in acts if is_indoor(a)]
-    return {"all": build(acts), "outdoor": build(outdoor), "indoor": build(indoor)}
-
-
-def read_checkpoint() -> int | None:
-    """Return timestamp of last processed activity, or None on first run."""
-    try:
-        return int(_CHECKPOINT_PATH.read_text().strip())
-    except Exception:
-        return None
-
-
-def write_checkpoint(ts: int):
-    _CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _CHECKPOINT_PATH.write_text(str(ts))
+    return {"all": build(acts)}
 
 
 # ---------------------------------------------------------------------------
@@ -216,10 +176,6 @@ nav {
   display: flex; align-items: center; gap: 6px;
 }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #FC4C02; }
-.outdoor-ratio {
-  font-size: .8rem; font-weight: 600; margin-top: 5px;
-  display: flex; align-items: center; gap: 5px;
-}
 .weather-widget {
   background: white; border-radius: 10px;
   padding: 8px 14px; font-size: .82rem; color: #555;
@@ -244,18 +200,6 @@ nav {
 .tab.active { background: #FC4C02; color: white; border-color: #FC4C02; }
 .tab:not(.active):hover { border-color: #bbb; color: #333; }
 
-/* OUTDOOR TOGGLE */
-.outdoor-toggle {
-  display: flex; border: 1.5px solid #eee; border-radius: 9px; overflow: hidden;
-  background: white;
-}
-.otab {
-  padding: 6px 14px; font-size: .78rem; font-weight: 600;
-  border: none; background: transparent; color: #888; cursor: pointer;
-  transition: all .15s;
-}
-.otab.active { background: #1c1c1e; color: white; }
-.otab:not(.active):hover { color: #555; }
 
 /* TOTALS */
 .totals { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 22px; }
@@ -520,7 +464,6 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
           <span class="dot"></span>
           <span id="period-label"></span>
         </div>
-        <div class="outdoor-ratio" id="outdoor-ratio"></div>
       </div>
       __WEATHER__
     </div>
@@ -541,11 +484,6 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
           <div id="history-picker-list"></div>
         </div>
       </div>
-    </div>
-    <div class="outdoor-toggle">
-      <button class="otab active" onclick="setFilter('all')"     id="otab-all">All</button>
-      <button class="otab"        onclick="setFilter('outdoor')" id="otab-out">🌤️ Outdoor</button>
-      <button class="otab"        onclick="setFilter('indoor')"  id="otab-in">🏠 Indoor</button>
     </div>
   </div>
   <div class="hist-backdrop" id="hist-backdrop" onclick="closeHistoryPicker()"></div>
@@ -629,20 +567,9 @@ const EMPTY_MSGS = [
   { emoji: '🌧️', title: 'Rain? Wind? Comfy couch?', body: 'Reason unknown, result clear — no activities this week yet.' },
   { emoji: '🧘', title: 'Recovery week', body: "At least that's what the support crew says. Either way — no runs yet." },
 ];
-const EMPTY_OUTDOOR = [
-  { emoji: '🌤️', title: 'Nobody ventured outside yet this week', body: 'No outdoor runs logged. Maybe waiting for the right weather — or the right mood.' },
-  { emoji: '🌲', title: 'Quiet outside this week', body: 'Trails and roads are patiently waiting. No outdoor run yet.' },
-  { emoji: '🏕️', title: 'Outside? Not this week yet', body: 'Shoes clean, asphalt untouched. Outdoor runs are yet to come.' },
-];
-const EMPTY_INDOOR = [
-  { emoji: '🔌', title: 'Treadmill is cold this week', body: 'Zwift and Rouvy are sleeping. Not a single virtual step produced yet.' },
-  { emoji: '📺', title: 'Couch: 1 – Treadmill: 0', body: "No indoor runs this week yet. The treadmill in the living room is resting." },
-  { emoji: '🏠', title: 'Running at home? Not this week yet', body: 'The treadmill waits patiently. Nobody has stepped on yet.' },
-];
 
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-let currentFilter      = 'all';
 let currentSort        = { key: 'km', dir: -1 };
 let currentHistoryWeek = null;
 let cumulativeMode     = false;
@@ -661,11 +588,11 @@ function sundayOfWeek(weekId) {
   return sun.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function buildCumulative(filter) {
+function buildCumulative() {
   const weeks = [DATA['week'], ...Object.values(HISTORY)];
   const byName = {};
   for (const wk of weeks) {
-    const wd = wk[filter] || wk['all'];
+    const wd = wk['all'];
     for (const r of (wd.leaderboard || [])) {
       if (!byName[r.name]) byName[r.name] = { name: r.name, km: 0, elev: 0, acts: 0, time_s: 0, ebike: false };
       byName[r.name].km    += r.km;
@@ -697,12 +624,9 @@ function buildCumulative(filter) {
 }
 
 function d() {
-  if (cumulativeMode) return buildCumulative(currentFilter);
-  if (currentHistoryWeek) {
-    const hw = HISTORY[currentHistoryWeek];
-    return hw[currentFilter] || hw['all'];
-  }
-  return DATA['week'][currentFilter];
+  if (cumulativeMode) return buildCumulative();
+  if (currentHistoryWeek) return HISTORY[currentHistoryWeek]['all'];
+  return DATA['week']['all'];
 }
 
 function toggleHistoryPicker(e) {
@@ -748,28 +672,11 @@ function render() {
   const data = d();
   if (cumulativeMode) {
     document.getElementById('period-label').textContent = `Cumulative · Week of ${sundayOfWeek('__CURRENT_WEEK_ID__')}`;
+  } else if (currentHistoryWeek) {
+    document.getElementById('period-label').textContent = data.label;
   } else {
-    const _wid = currentHistoryWeek || '__CURRENT_WEEK_ID__';
-    const _wNum = parseInt(_wid.split('-W')[1] || '0');
+    const _wNum = parseInt('__CURRENT_WEEK_ID__'.split('-W')[1] || '0');
     document.getElementById('period-label').textContent = `Week ${_wNum}  ·  ${data.label}`;
-  }
-
-  // Outdoor / indoor ratio — always from "all" data
-  const modeData = currentHistoryWeek ? HISTORY[currentHistoryWeek] : DATA['week'];
-  const allData = modeData['all'];
-  const outData = modeData['outdoor'];
-  const ratioEl = document.getElementById('outdoor-ratio');
-  if (allData.total_km > 0) {
-    const outPct = Math.round((outData.total_km || 0) / allData.total_km * 100);
-    const inPct  = 100 - outPct;
-    if (outPct >= 60)
-      ratioEl.innerHTML = `<span style="color:#22c55e">🌤️ ${outPct}% km outdoor</span>`;
-    else if (inPct >= 60)
-      ratioEl.innerHTML = `<span style="color:#888">🏠 ${inPct}% km indoor (Zwift/Rouvy season)</span>`;
-    else
-      ratioEl.innerHTML = `<span style="color:#888">⚖️ ${outPct}% outdoor · ${inPct}% indoor</span>`;
-  } else {
-    ratioEl.textContent = '';
   }
 
   document.getElementById('totals').innerHTML = [
@@ -835,16 +742,8 @@ function render() {
     const archiveHtml = hasPrev
       ? `Check out <a onclick="showPrevWeek()">last week's results</a>${hasHistory ? ` or <a onclick="toggleHistoryPicker(event)">older archives</a>` : ''}.`
       : (hasHistory ? `Browse <a onclick="toggleHistoryPicker(event)">older results</a> in the archive.` : '');
-    if (currentFilter === 'outdoor') {
-      msg = EMPTY_OUTDOOR[wNum % EMPTY_OUTDOOR.length];
-      bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">Outdoor runs will appear here as soon as someone heads out.</div>`;
-    } else if (currentFilter === 'indoor') {
-      msg = EMPTY_INDOOR[wNum % EMPTY_INDOOR.length];
-      bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">Zwift and Rouvy runs will appear here as soon as someone hops on the treadmill.</div>`;
-    } else {
-      msg = EMPTY_MSGS[wNum % EMPTY_MSGS.length];
-      bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">This page updates every hour.</div>`;
-    }
+    msg = EMPTY_MSGS[wNum % EMPTY_MSGS.length];
+    bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">This page updates every hour.</div>`;
     esEl.innerHTML = `<h2><span class="es-emoji">${msg.emoji}</span>${msg.title}</h2><p>${msg.body}</p>${bottomHtml}`;
   }
   esEl.style.display = isEmpty ? '' : 'none';
@@ -955,13 +854,6 @@ function showLeaderboard() {
   render();
 }
 
-function setFilter(f) {
-  currentFilter = f;
-  document.getElementById('otab-all').classList.toggle('active', f==='all');
-  document.getElementById('otab-out').classList.toggle('active', f==='outdoor');
-  document.getElementById('otab-in').classList.toggle('active',  f==='indoor');
-  render();
-}
 
 document.getElementById('btn-week').textContent = 'Week of ' + sundayOfWeek('__CURRENT_WEEK_ID__');
 render();
@@ -991,8 +883,7 @@ def save_week_history(week_id: str, label: str, week_data: dict):
     """Save current week data to dashboard/history/{week_id}.json."""
     hist_dir = Path(__file__).parent / "dashboard" / "history"
     hist_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"week_id": week_id, "label": label,
-               "all": week_data["all"], "outdoor": week_data["outdoor"], "indoor": week_data["indoor"]}
+    payload = {"week_id": week_id, "label": label, "all": week_data["all"]}
     (hist_dir / f"{week_id}.json").write_text(
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
@@ -1034,44 +925,23 @@ def generate():
     week_id = get_week_id()
     history = load_history()
 
-    checkpoint_ts  = read_checkpoint()
-    sunday_ts      = _current_sunday_ts()
-    # Use checkpoint if older than this Sunday (backfill needed); otherwise fetch current week only.
-    after_ts = sunday_ts if (checkpoint_ts is not None and checkpoint_ts >= sunday_ts) else checkpoint_ts
-
-    print(f"  Fetching activities {'(all time)' if after_ts is None else f'after {after_ts}'}...")
+    if history:
+        after_ts = _current_sunday_ts()
+        print(f"  Fetching activities after {after_ts} (current week)...")
+    else:
+        after_ts = None
+        print("  First run — fetching all activities from club start...")
     activities = strava_client.fetch_club_activities(token, after=after_ts)
-    activities.sort(key=lambda a: a.get("start_date", ""))  # chronological
 
-    # Group by dashboard week
-    by_week: dict = defaultdict(list)
-    for act in activities:
-        wid = activity_week_id(act)
-        if wid:
-            by_week[wid].append(act)
-    by_week.setdefault(week_id, [])  # ensure current week key exists
-
-    # Build and save each affected week
-    for wid, acts in by_week.items():
-        if wid in history and wid != week_id:
-            continue  # past frozen week already saved — skip
-        label = week_label_for_id(wid)
-        save_week_history(wid, label, build_week_data(acts, members, label))
-
-    # Advance checkpoint to latest seen activity
-    if activities:
-        max_ts = max(
-            int(datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).timestamp())
-            for a in activities if a.get("start_date")
-        )
-        write_checkpoint(max_ts)
+    label = week_label_for_id(week_id)
+    save_week_history(week_id, label, build_week_data(activities, members, label))
 
     history = load_history()
     # exclude current week from history tabs (it's shown as live)
     history_past = {k: v for k, v in history.items() if k != week_id}
     prev_week_id = max(history_past.keys()) if history_past else ""
 
-    data = {"week": history.get(week_id, {"all": {}, "outdoor": {}, "indoor": {}})}
+    data = {"week": history.get(week_id, {"all": {}})}
 
     _, human_label = now_label()
 

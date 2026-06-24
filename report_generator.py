@@ -3,19 +3,6 @@ from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 
-def period_timestamps(mode: str = "week") -> tuple:
-    """
-    Return (after_ts: int, label: str) for the given mode.
-    mode='week' -> from Sunday 00:00 UTC to now
-    """
-    now = datetime.now(timezone(timedelta(hours=8)))
-    sunday = (now - timedelta(days=(now.weekday() + 1) % 7)).replace(
-        hour=0, minute=0, second=0, microsecond=0)
-
-    label = f"{sunday.day}.{sunday.month} – {now.day}.{now.month}.{now.year}"
-    return int(sunday.timestamp()), label
-
-
 def compute_stats(activities: list, members: list = None) -> dict:
     """
     Compute all statistics from club activities.
