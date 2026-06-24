@@ -75,10 +75,11 @@ def now_label() -> tuple:
 # Fetch & compute
 # ---------------------------------------------------------------------------
 
-def fetch_mode(mode: str, token: str, members: list) -> dict:
+def fetch_mode(mode: str, token: str, members: list, full: bool = False) -> dict:
     """Return {all: stats, outdoor: stats, indoor: stats} for a given mode."""
     after_ts, label = report_generator.period_timestamps(mode)
-    activities = strava_client.fetch_club_activities(token, after=after_ts)
+    # ponytail: full=True skips the after filter to fetch all available club activities
+    activities = strava_client.fetch_club_activities(token, after=None if full else after_ts)
 
     def build(acts):
         s = report_generator.compute_stats(acts, members=members)
@@ -986,11 +987,14 @@ def generate():
     token   = strava_client.get_access_token()
     members = strava_client.fetch_club_members(token)
 
+    history = load_history()
+    week_id = get_week_id()
+    is_first_run = not any(k != week_id for k in history)
+
     data = {
-        "week": fetch_mode("week", token, members),
+        "week": fetch_mode("week", token, members, full=is_first_run),
     }
 
-    week_id = get_week_id()
     week_label = data["week"]["all"].get("label", week_id)
     save_week_history(week_id, week_label, data["week"])
     history = load_history()
