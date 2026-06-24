@@ -6,14 +6,14 @@ from collections import defaultdict
 def period_timestamps(mode: str = "week") -> tuple:
     """
     Return (after_ts: int, label: str) for the given mode.
-    mode='week' -> from Monday 00:00 UTC to now
+    mode='week' -> from Sunday 00:00 UTC to now
     """
-    now = datetime.now(timezone.utc)
-    monday = (now - timedelta(days=now.weekday())).replace(
+    now = datetime.now(timezone(timedelta(hours=8)))
+    sunday = (now - timedelta(days=(now.weekday() + 1) % 7)).replace(
         hour=0, minute=0, second=0, microsecond=0)
 
-    label = f"{monday.day}.{monday.month} – {now.day}.{now.month}.{now.year}"
-    return int(monday.timestamp()), label
+    label = f"{sunday.day}.{sunday.month} – {now.day}.{now.month}.{now.year}"
+    return int(sunday.timestamp()), label
 
 
 def compute_stats(activities: list, members: list = None) -> dict:
@@ -186,6 +186,28 @@ def compute_stats(activities: list, members: list = None) -> dict:
             "ebike": mostly_ebike,
             "elev_per_km": round(athlete_elev[name] / km, 1) if km > 0 else None,
         })
+
+    # Add zero-row entries for members with no activities this period
+    active_names = {r["name"] for r in leaderboard}
+    if members:
+        for m in members:
+            name = f"{m.get('firstname', '')} {m.get('lastname', '')}".strip()
+            if name and name not in active_names:
+                leaderboard.append({
+                    "name": name,
+                    "athlete_id": member_map.get(name),
+                    "km": 0.0,
+                    "elev": 0,
+                    "time": "0h 0m",
+                    "time_s": 0,
+                    "acts": 0,
+                    "avg_speed": "–",
+                    "avg_speed_ms": 0,
+                    "longest": 0.0,
+                    "gap": f"–{leader_km:.1f}" if leader_km > 0 else "leader",
+                    "ebike": False,
+                    "elev_per_km": None,
+                })
 
     def award(rank, val_fn):
         if not rank:

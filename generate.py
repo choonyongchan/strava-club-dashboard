@@ -484,6 +484,7 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
     <div class="toggle">
       <button class="tab active" onclick="showMode('week')" id="btn-week">This Week</button>
       <button class="tab" onclick="showPrevWeek()" id="btn-7days" style="display:none">Last Week</button>
+      <button class="tab" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
       <div class="history-wrap" id="history-wrap" style="display:none">
         <button class="tab" onclick="toggleHistoryPicker(event)" id="btn-history">📅 History</button>
         <div class="history-picker" id="history-picker">
@@ -598,8 +599,59 @@ function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.
 let currentFilter      = 'all';
 let currentSort        = { key: 'km', dir: -1 };
 let currentHistoryWeek = null;
+let cumulativeMode     = false;
+
+function fmtTime(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return `${h}h ${m < 10 ? '0' : ''}${m}m`;
+}
+
+function sundayOfWeek(weekId) {
+  const [yr, w] = weekId.split('-W').map(Number);
+  const jan4 = new Date(yr, 0, 4);
+  const dow = jan4.getDay() || 7;
+  const mon1 = new Date(jan4); mon1.setDate(jan4.getDate() - dow + 1);
+  const sun = new Date(mon1); sun.setDate(mon1.getDate() + (w - 1) * 7 + 6);
+  return sun.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function buildCumulative(filter) {
+  const weeks = [DATA['week'], ...Object.values(HISTORY)];
+  const byName = {};
+  for (const wk of weeks) {
+    const wd = wk[filter] || wk['all'];
+    for (const r of (wd.leaderboard || [])) {
+      if (!byName[r.name]) byName[r.name] = { name: r.name, km: 0, elev: 0, acts: 0, time_s: 0, ebike: false };
+      byName[r.name].km    += r.km;
+      byName[r.name].elev  += r.elev;
+      byName[r.name].acts  += r.acts;
+      byName[r.name].time_s += r.time_s;
+      if (r.ebike) byName[r.name].ebike = true;
+    }
+  }
+  const rows = Object.values(byName).sort((a, b) => b.km - a.km);
+  rows.forEach((r, i) => {
+    r.km          = Math.round(r.km * 10) / 10;
+    r.elev        = Math.round(r.elev);
+    r.gap         = i === 0 ? 'leader' : `–${(rows[0].km - r.km).toFixed(1)}`;
+    r.time        = fmtTime(r.time_s);
+    r.elev_per_km = r.km > 0 ? Math.round(r.elev / r.km * 10) / 10 : 0;
+    r.avg_speed_ms = r.time_s > 0 ? r.km / (r.time_s / 3600) / 3.6 : 0;
+    r.avg_speed   = r.time_s > 0 ? (r.km / (r.time_s / 3600)).toFixed(1) + ' km/h' : '–';
+    r.longest     = null; // ponytail: doesn't aggregate meaningfully
+  });
+  return {
+    leaderboard:   rows,
+    total_km:      rows.reduce((s, r) => s + r.km, 0),
+    total_elev:    rows.reduce((s, r) => s + r.elev, 0),
+    ride_count:    rows.reduce((s, r) => s + r.acts, 0),
+    athlete_count: rows.length,
+    label:         '',
+  };
+}
 
 function d() {
+  if (cumulativeMode) return buildCumulative(currentFilter);
   if (currentHistoryWeek) {
     const hw = HISTORY[currentHistoryWeek];
     return hw[currentFilter] || hw['all'];
@@ -648,9 +700,13 @@ function sortedLeaderboard(rows) {
 
 function render() {
   const data = d();
-  const _wid = currentHistoryWeek || '__CURRENT_WEEK_ID__';
-  const _wNum = parseInt(_wid.split('-W')[1] || '0');
-  document.getElementById('period-label').textContent = `Week ${_wNum}  ·  ${data.label}`;
+  if (cumulativeMode) {
+    document.getElementById('period-label').textContent = `Cumulative · Week of ${sundayOfWeek('__CURRENT_WEEK_ID__')}`;
+  } else {
+    const _wid = currentHistoryWeek || '__CURRENT_WEEK_ID__';
+    const _wNum = parseInt(_wid.split('-W')[1] || '0');
+    document.getElementById('period-label').textContent = `Week ${_wNum}  ·  ${data.label}`;
+  }
 
   // Outdoor / indoor ratio — always from "all" data
   const modeData = currentHistoryWeek ? HISTORY[currentHistoryWeek] : DATA['week'];
@@ -753,6 +809,11 @@ function render() {
     document.getElementById('fun-section').style.display    = 'none';
     document.getElementById('device-section').style.display = 'none';
   }
+  if (cumulativeMode) {
+    document.getElementById('awards-section').style.display  = 'none';
+    document.getElementById('fun-section').style.display     = 'none';
+    document.getElementById('device-section').style.display  = 'none';
+  }
 
   // History picker — populate week grid
   const histKeys = new Set(Object.keys(HISTORY));
@@ -801,34 +862,50 @@ function renderLeaderboard(data) {
       <td>${r.time}</td>
       <td>${r.acts}</td>
       <td>${r.avg_speed}</td>
-      <td>${r.longest} km</td>
+      <td>${r.longest != null ? r.longest + ' km' : '–'}</td>
     </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:#ccc;padding:20px">No activities</td></tr>';
 }
 
 function showMode(mode) {
+  cumulativeMode = false;
   currentHistoryWeek = null;
   document.getElementById('btn-week').classList.toggle('active', mode==='week');
   document.getElementById('btn-7days').classList.remove('active');
   document.getElementById('btn-history').classList.remove('active');
+  document.getElementById('btn-leaderboard').classList.remove('active');
   render();
 }
 
 function showPrevWeek() {
   if (!PREV_WEEK_ID) return;
+  cumulativeMode = false;
   currentHistoryWeek = PREV_WEEK_ID;
   document.getElementById('btn-week').classList.remove('active');
   document.getElementById('btn-7days').classList.add('active');
   document.getElementById('btn-history').classList.remove('active');
+  document.getElementById('btn-leaderboard').classList.remove('active');
   render();
 }
 
 function showHistoryWeek(weekId) {
+  cumulativeMode = false;
   currentHistoryWeek = weekId;
   closeHistoryPicker();
   const isPrevWeek = weekId === PREV_WEEK_ID;
   document.getElementById('btn-week').classList.remove('active');
   document.getElementById('btn-7days').classList.toggle('active', isPrevWeek);
   document.getElementById('btn-history').classList.toggle('active', !isPrevWeek);
+  document.getElementById('btn-leaderboard').classList.remove('active');
+  render();
+}
+
+function showLeaderboard() {
+  cumulativeMode = true;
+  currentHistoryWeek = null;
+  document.getElementById('btn-week').classList.remove('active');
+  document.getElementById('btn-7days').classList.remove('active');
+  document.getElementById('btn-history').classList.remove('active');
+  document.getElementById('btn-leaderboard').classList.add('active');
   render();
 }
 
