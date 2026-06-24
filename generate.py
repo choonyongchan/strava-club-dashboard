@@ -7,7 +7,8 @@ Usage:
 """
 import os, json, math
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -72,33 +73,77 @@ def now_label() -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# Fetch & compute
+# Week helpers
 # ---------------------------------------------------------------------------
 
-def fetch_mode(mode: str, token: str, members: list, full: bool = False) -> dict:
-    """Return {all: stats, outdoor: stats, indoor: stats} for a given mode."""
-    after_ts, label = report_generator.period_timestamps(mode)
-    # ponytail: full=True skips the after filter to fetch all available club activities
-    activities = strava_client.fetch_club_activities(token, after=None if full else after_ts)
+_TZ8 = timezone(timedelta(hours=8))
+_CHECKPOINT_PATH = Path(__file__).parent / "dashboard" / "history" / ".checkpoint"
 
-    def build(acts):
-        s = report_generator.compute_stats(acts, members=members)
+
+def _current_sunday_ts() -> int:
+    """Unix timestamp of the most recent Sunday 00:00 UTC+8."""
+    now = datetime.now(_TZ8)
+    days_back = (now.weekday() + 1) % 7  # Mon=0..Sun=6 → Sun=0 days back
+    sunday = (now - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(sunday.timestamp())
+
+
+def activity_week_id(act: dict) -> str:
+    """Return the dashboard week ID for an activity.
+
+    Dashboard weeks run Sun–Sat; ISO weeks run Mon–Sun.
+    Adding 1 day before calling isocalendar() maps Sunday → next ISO week,
+    matching the convention used by get_week_id().
+    """
+    start = act.get("start_date", "")
+    if not start:
+        return ""
+    dt_utc = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    dt_local = dt_utc.astimezone(_TZ8)
+    iso = (dt_local + timedelta(days=1)).isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def week_label_for_id(week_id: str) -> str:
+    """Human-readable date range for a week ID (e.g. '21.6 – 27.6.2026')."""
+    year, wnum = int(week_id[:4]), int(week_id[5:])
+    # Monday of ISO week wnum
+    jan4 = datetime(year, 1, 4, tzinfo=_TZ8)
+    monday = jan4 - timedelta(days=jan4.weekday()) + timedelta(weeks=wnum - 1)
+    sunday = monday - timedelta(days=1)  # week start (Sun)
+    now = datetime.now(_TZ8)
+    current_week_id = get_week_id()
+    end = now if week_id == current_week_id else monday + timedelta(days=5)  # Sat
+    return f"{sunday.day}.{sunday.month} – {end.day}.{end.month}.{end.year}"
+
+
+def build_week_data(acts: list, members: list, label: str) -> dict:
+    """Return {all, outdoor, indoor} stats dict for a list of activities."""
+    def is_indoor(act):
+        return act.get("type") in ("VirtualRide", "IndoorCycling") or act.get("trainer") is True
+
+    def build(a):
+        s = report_generator.compute_stats(a, members=members)
         s["label"] = label
-        s["count"] = len(acts)
+        s["count"] = len(a)
         return make_json_safe(s)
 
-    def is_indoor(act):
-        return (
-            act.get("type") in ("VirtualRide", "IndoorCycling")
-            or act.get("trainer") is True
-        )
-    outdoor = [a for a in activities if not is_indoor(a)]
-    indoor  = [a for a in activities if is_indoor(a)]
-    return {
-        "all":     build(activities),
-        "outdoor": build(outdoor),
-        "indoor":  build(indoor),
-    }
+    outdoor = [a for a in acts if not is_indoor(a)]
+    indoor  = [a for a in acts if is_indoor(a)]
+    return {"all": build(acts), "outdoor": build(outdoor), "indoor": build(indoor)}
+
+
+def read_checkpoint() -> int | None:
+    """Return timestamp of last processed activity, or None on first run."""
+    try:
+        return int(_CHECKPOINT_PATH.read_text().strip())
+    except Exception:
+        return None
+
+
+def write_checkpoint(ts: int):
+    _CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _CHECKPOINT_PATH.write_text(str(ts))
 
 
 # ---------------------------------------------------------------------------
@@ -527,19 +572,19 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
   </div>
 
   <div id="leaderboard-section">
-    <div class="section-title">Rider Leaderboard</div>
+    <div class="section-title">Runner Leaderboard</div>
     <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>#</th>
-          <th>Rider</th>
+          <th>Runner</th>
           <th class="sortable sort-desc" data-key="km"           onclick="sortBy('km')">km</th>
           <th>Gap</th>
           <th class="sortable" data-key="elev"          onclick="sortBy('elev')">Elevation</th>
           <th class="sortable" data-key="elev_per_km"   onclick="sortBy('elev_per_km')">m+/km</th>
           <th class="sortable" data-key="time_s"        onclick="sortBy('time_s')">Time</th>
-          <th class="sortable" data-key="acts"          onclick="sortBy('acts')">Rides</th>
+          <th class="sortable" data-key="acts"          onclick="sortBy('acts')">Runs</th>
           <th class="sortable" data-key="avg_speed_ms"  onclick="sortBy('avg_speed_ms')">Avg Speed</th>
           <th class="sortable" data-key="longest"       onclick="sortBy('longest')">Longest</th>
         </tr>
@@ -567,9 +612,9 @@ const AWARDS = [
   { key:'king_elev',    emoji:'🏔️', title:'Climbing King',   muted:false },
   { key:'marathoner',   emoji:'⏱️', title:'Marathoner',       muted:false },
   { key:'fastest',      emoji:'⚡', title:'Fastest',          muted:false },
-  { key:'longest',      emoji:'📏', title:'Longest Ride',     muted:false },
+  { key:'longest',      emoji:'📏', title:'Longest Run',      muted:false },
   { key:'climber',      emoji:'🐐', title:'Mountain Goat',    muted:false },
-  { key:'flatrider',    emoji:'🛣️', title:'Flat Rider',       muted:false },
+  { key:'flatrunner',   emoji:'🛣️', title:'Flat Runner',      muted:false },
 ];
 const FUN = [
   { key:'virtual',  emoji:'📶', title:'Virtual Cyclist',  desc:'Their bike has never seen rain or sun.' },
@@ -578,21 +623,21 @@ const FUN = [
 ];
 
 const EMPTY_MSGS = [
-  { emoji: '🛋️', title: 'Cyclists are in offline mode this week', body: 'No one has logged a ride yet. Pedals are resting.' },
-  { emoji: '🦗', title: 'Quiet as a Monday morning garage', body: "Nobody's hit the saddle this week yet. Bikes are waiting patiently." },
+  { emoji: '🛋️', title: 'Runners are in offline mode this week', body: 'No one has logged a run yet. Shoes are resting.' },
+  { emoji: '🦗', title: 'Quiet as a Monday morning track', body: "Nobody's laced up this week yet. Roads are waiting patiently." },
   { emoji: '⏳', title: 'Week is just getting started', body: "Nothing to measure or count yet. Maybe tomorrow." },
   { emoji: '🌧️', title: 'Rain? Wind? Comfy couch?', body: 'Reason unknown, result clear — no activities this week yet.' },
-  { emoji: '🧘', title: 'Recovery week', body: "At least that's what the support car says. Either way — no rides yet." },
+  { emoji: '🧘', title: 'Recovery week', body: "At least that's what the support crew says. Either way — no runs yet." },
 ];
 const EMPTY_OUTDOOR = [
-  { emoji: '🌤️', title: 'Nobody ventured outside yet this week', body: 'No outdoor rides logged. Maybe waiting for the right weather — or the right mood.' },
-  { emoji: '🌲', title: 'Quiet outside this week', body: 'Trails and roads are patiently waiting. No outdoor ride yet.' },
-  { emoji: '🏕️', title: 'Outside? Not this week yet', body: 'Fenders clean, asphalt untouched. Outdoor rides are yet to come.' },
+  { emoji: '🌤️', title: 'Nobody ventured outside yet this week', body: 'No outdoor runs logged. Maybe waiting for the right weather — or the right mood.' },
+  { emoji: '🌲', title: 'Quiet outside this week', body: 'Trails and roads are patiently waiting. No outdoor run yet.' },
+  { emoji: '🏕️', title: 'Outside? Not this week yet', body: 'Shoes clean, asphalt untouched. Outdoor runs are yet to come.' },
 ];
 const EMPTY_INDOOR = [
-  { emoji: '🔌', title: 'Trainer is cold this week', body: 'Zwift and Rouvy are sleeping. Not a single virtual watt produced yet.' },
-  { emoji: '📺', title: 'Couch: 1 – Trainer: 0', body: "No indoor rides this week yet. The bike in the living room is resting." },
-  { emoji: '🏠', title: 'Cycling at home? Not this week yet', body: 'The trainer waits patiently. Nobody has hopped on yet.' },
+  { emoji: '🔌', title: 'Treadmill is cold this week', body: 'Zwift and Rouvy are sleeping. Not a single virtual step produced yet.' },
+  { emoji: '📺', title: 'Couch: 1 – Treadmill: 0', body: "No indoor runs this week yet. The treadmill in the living room is resting." },
+  { emoji: '🏠', title: 'Running at home? Not this week yet', body: 'The treadmill waits patiently. Nobody has stepped on yet.' },
 ];
 
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -645,7 +690,7 @@ function buildCumulative(filter) {
     leaderboard:   rows,
     total_km:      rows.reduce((s, r) => s + r.km, 0),
     total_elev:    rows.reduce((s, r) => s + r.elev, 0),
-    ride_count:    rows.reduce((s, r) => s + r.acts, 0),
+    run_count:     rows.reduce((s, r) => s + r.acts, 0),
     athlete_count: rows.length,
     label:         '',
   };
@@ -730,8 +775,8 @@ function render() {
   document.getElementById('totals').innerHTML = [
     { v: Math.round(data.total_km).toLocaleString('en'), l: 'total km' },
     { v: Math.round(data.total_elev).toLocaleString('en'), l: 'elevation (m)' },
-    { v: data.ride_count, l: 'activities' },
-    { v: data.athlete_count, l: 'riders' },
+    { v: data.run_count, l: 'activities' },
+    { v: data.athlete_count, l: 'runners' },
   ].map(t => `<div class="total-card fade">
     <div class="val">${t.v}</div><div class="lbl">${t.l}</div>
   </div>`).join('');
@@ -780,7 +825,7 @@ function render() {
   document.getElementById('device-section').style.display = devs.length ? '' : 'none';
 
   // Empty state
-  const isEmpty = !data.ride_count;
+  const isEmpty = !data.run_count;
   const esEl = document.getElementById('empty-state');
   if (isEmpty) {
     const wNum = parseInt('__CURRENT_WEEK_ID__'.split('-W')[1] || '1');
@@ -792,10 +837,10 @@ function render() {
       : (hasHistory ? `Browse <a onclick="toggleHistoryPicker(event)">older results</a> in the archive.` : '');
     if (currentFilter === 'outdoor') {
       msg = EMPTY_OUTDOOR[wNum % EMPTY_OUTDOOR.length];
-      bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">Outdoor rides will appear here as soon as someone heads out.</div>`;
+      bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">Outdoor runs will appear here as soon as someone heads out.</div>`;
     } else if (currentFilter === 'indoor') {
       msg = EMPTY_INDOOR[wNum % EMPTY_INDOOR.length];
-      bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">Zwift and Rouvy rides will appear here as soon as someone hops on the trainer.</div>`;
+      bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">Zwift and Rouvy runs will appear here as soon as someone hops on the treadmill.</div>`;
     } else {
       msg = EMPTY_MSGS[wNum % EMPTY_MSGS.length];
       bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">This page updates every hour.</div>`;
@@ -981,26 +1026,52 @@ def make_json_safe(stats: dict) -> dict:
 
 
 def generate():
-    from datetime import timezone
     print("Fetching data from Strava...")
 
     token   = strava_client.get_access_token()
     members = strava_client.fetch_club_members(token)
 
-    history = load_history()
     week_id = get_week_id()
-    is_first_run = not any(k != week_id for k in history)
+    history = load_history()
 
-    data = {
-        "week": fetch_mode("week", token, members, full=is_first_run),
-    }
+    checkpoint_ts  = read_checkpoint()
+    sunday_ts      = _current_sunday_ts()
+    # Use checkpoint if older than this Sunday (backfill needed); otherwise fetch current week only.
+    after_ts = sunday_ts if (checkpoint_ts is not None and checkpoint_ts >= sunday_ts) else checkpoint_ts
 
-    week_label = data["week"]["all"].get("label", week_id)
-    save_week_history(week_id, week_label, data["week"])
+    print(f"  Fetching activities {'(all time)' if after_ts is None else f'after {after_ts}'}...")
+    activities = strava_client.fetch_club_activities(token, after=after_ts)
+    activities.sort(key=lambda a: a.get("start_date", ""))  # chronological
+
+    # Group by dashboard week
+    by_week: dict = defaultdict(list)
+    for act in activities:
+        wid = activity_week_id(act)
+        if wid:
+            by_week[wid].append(act)
+    by_week.setdefault(week_id, [])  # ensure current week key exists
+
+    # Build and save each affected week
+    for wid, acts in by_week.items():
+        if wid in history and wid != week_id:
+            continue  # past frozen week already saved — skip
+        label = week_label_for_id(wid)
+        save_week_history(wid, label, build_week_data(acts, members, label))
+
+    # Advance checkpoint to latest seen activity
+    if activities:
+        max_ts = max(
+            int(datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).timestamp())
+            for a in activities if a.get("start_date")
+        )
+        write_checkpoint(max_ts)
+
     history = load_history()
     # exclude current week from history tabs (it's shown as live)
     history_past = {k: v for k, v in history.items() if k != week_id}
     prev_week_id = max(history_past.keys()) if history_past else ""
+
+    data = {"week": history.get(week_id, {"all": {}, "outdoor": {}, "indoor": {}})}
 
     _, human_label = now_label()
 
@@ -1039,7 +1110,7 @@ def generate():
 
     w = data["week"]["all"]
     print(f"Generated: {out_path}")
-    print(f"  This week: {w.get('count', 0)} activities, {w.get('athlete_count', 0)} riders")
+    print(f"  This week: {w.get('count', 0)} activities, {w.get('athlete_count', 0)} runners")
 
 
 if __name__ == "__main__":

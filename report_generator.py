@@ -45,7 +45,7 @@ def compute_stats(activities: list, members: list = None) -> dict:
     athlete_elapsed_time: dict = defaultdict(float)
     athlete_devices: dict = defaultdict(set)
 
-    # Stats excluding e-bike rides — used for awards
+    # Stats excluding e-bike runs — used for awards
     award_km: dict        = defaultdict(float)
     award_elev: dict      = defaultdict(float)
     award_time: dict      = defaultdict(float)
@@ -53,9 +53,9 @@ def compute_stats(activities: list, members: list = None) -> dict:
     award_count_acts: dict = defaultdict(int)
     award_longest: dict   = defaultdict(float)
 
-    # Climber — only rides with >= 8 m+/km (real hills)
-    climber_ride_elev: dict = defaultdict(float)
-    climber_ride_km: dict   = defaultdict(float)
+    # Climber — only runs with >= 8 m+/km (real hills)
+    climber_run_elev: dict = defaultdict(float)
+    climber_run_km: dict   = defaultdict(float)
 
     for act in activities:
         athlete = act.get("athlete", {})
@@ -99,8 +99,8 @@ def compute_stats(activities: list, members: list = None) -> dict:
             if speed > 0 and dist_km > 0.5:
                 award_speeds[name].append(speed)
             if dist_km >= 5 and dist_km > 0 and (elev / dist_km) >= 8:
-                climber_ride_elev[name] += elev
-                climber_ride_km[name]   += dist_km
+                climber_run_elev[name] += elev
+                climber_run_km[name]   += dist_km
 
     def top(d, reverse=True):
         return sorted(d.items(), key=lambda x: x[1], reverse=reverse)
@@ -123,7 +123,7 @@ def compute_stats(activities: list, members: list = None) -> dict:
     def spd_kmh(ms: float) -> str:
         return f"{ms * 3.6:.1f} km/h"
 
-    # Device stats — count unique riders per device
+    # Device stats — count unique runners per device
     device_athlete_count: dict = defaultdict(int)
     for _name, devs in athlete_devices.items():
         for dev in devs:
@@ -163,7 +163,7 @@ def compute_stats(activities: list, members: list = None) -> dict:
     award_acts_rank  = top(award_count_acts)
     award_long_rank  = top(award_longest)
 
-    # Leaderboard — all riders sorted by km
+    # Leaderboard — all runners sorted by km
     leader_km = km_rank[0][1] if km_rank else 0
     leaderboard = []
     for name, km in km_rank:
@@ -235,11 +235,11 @@ def compute_stats(activities: list, members: list = None) -> dict:
             ebike_counts[name] += 1
         break_time[name] += max(0, elapsed - moving)
 
-    # Climber — avg m+/km from rides with >= 8 m+/km, at least 30 km total
+    # Climber — avg m+/km from runs with >= 8 m+/km, at least 30 km total
     elev_per_km: dict = {}
-    for name in climber_ride_km:
-        if climber_ride_km[name] >= 30:
-            elev_per_km[name] = climber_ride_elev[name] / climber_ride_km[name]
+    for name in climber_run_km:
+        if climber_run_km[name] >= 30:
+            elev_per_km[name] = climber_run_elev[name] / climber_run_km[name]
 
     break_rank   = top(break_time)
     climber_rank = top(elev_per_km)
@@ -251,7 +251,7 @@ def compute_stats(activities: list, members: list = None) -> dict:
         "virtual": fun(
             top(virtual_counts)[0][0] if virtual_counts else None,
             f"{top(virtual_counts)[0][1]}x Zwift/Rouvy",
-            "Their bike has never seen rain or sun. Rides in slippers."
+            "Their treadmill has never seen rain or sun. Runs in slippers."
         ) if virtual_counts else None,
 
         "ebike": fun(
@@ -272,20 +272,20 @@ def compute_stats(activities: list, members: list = None) -> dict:
         name, val = climber_rank[0]
         climber_award = {"name": name, "athlete_id": athlete_id.get(name), "value": f"{val:.1f} m+/km"}
 
-    # Flat rider — lowest m+/km, at least 50 km (non-ebike rides)
-    flatrider_rank = top(
+    # Flat runner — lowest m+/km, at least 50 km (non-ebike runs)
+    flatrunner_rank = top(
         {n: award_elev[n] / award_km[n] for n in award_km if award_km[n] >= 50},
         reverse=False
     )
-    flatrider_award = None
-    if flatrider_rank:
-        name, val = flatrider_rank[0]
-        flatrider_award = {"name": name, "athlete_id": athlete_id.get(name), "value": f"{val:.1f} m+/km"}
+    flatrunner_award = None
+    if flatrunner_rank:
+        name, val = flatrunner_rank[0]
+        flatrunner_award = {"name": name, "athlete_id": athlete_id.get(name), "value": f"{val:.1f} m+/km"}
 
     return {
         "total_km": total_km,
         "total_elev": total_elev,
-        "ride_count": len(activities),
+        "run_count": len(activities),
         "athlete_count": len(athlete_km),
         "leaderboard": leaderboard,
         "fun_stats": fun_stats,
@@ -295,9 +295,9 @@ def compute_stats(activities: list, members: list = None) -> dict:
         "marathoner":  award(award_time_rank,  lambda v: fmt_time(v)),
         "snail":       award(award_snail_rank, lambda v: spd_kmh(v)),
         "fastest":     award(award_fast_rank,  lambda v: spd_kmh(v)),
-        "most_acts":   award(award_acts_rank,  lambda v: f"{v} rides"),
+        "most_acts":   award(award_acts_rank,  lambda v: f"{v} runs"),
         "longest":     award(award_long_rank,  lambda v: f"{v:.1f} km"),
         "climber":     climber_award,
-        "flatrider":   flatrider_award,
+        "flatrunner":  flatrunner_award,
         "device_stats": device_stats,
     }
