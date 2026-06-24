@@ -5,7 +5,7 @@ Run locally or via GitHub Actions (hourly cron).
 Usage:
   python3 generate.py
 """
-import os, json, math
+import os, json, math, csv
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
@@ -14,6 +14,54 @@ load_dotenv()
 
 import config
 import strava_client, report_generator
+
+# ---------------------------------------------------------------------------
+# Nominal roll — maps Strava truncated names to full formal names
+# ---------------------------------------------------------------------------
+
+def _all_truncations(strava_name: str):
+    """Yield every possible API-truncated form by splitting at each word boundary."""
+    parts = strava_name.lower().split()
+    yield strava_name.lower()  # ponytail: exact match first — handles full names returned by API
+    if len(parts) < 2:
+        return
+    for i in range(1, len(parts)):
+        prefix = " ".join(parts[:i])
+        yield f"{prefix} {parts[i][0]}."
+
+def load_unit_company_map(path=None) -> dict:
+    """Returns {FULL_NAME: {unit, company}} from nominal_roll.csv"""
+    if path is None:
+        path = Path(__file__).parent / "nominal_roll.csv"
+    result = {}
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                full = row.get("Name", "").strip()
+                if full:
+                    result[full] = {
+                        "unit":    row.get("Unit", "").strip(),
+                        "company": row.get("Company", "").strip(),
+                    }
+    except FileNotFoundError:
+        pass
+    return result
+
+def load_name_map(path=None) -> dict:
+    if path is None:
+        path = Path(__file__).parent / "nominal_roll.csv"
+    name_map = {}
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                strava = row.get("STRAVA username", "").strip()
+                full  = row.get("Name", "").strip()
+                if strava and full:
+                    for key in _all_truncations(strava):
+                        name_map[key] = full
+    except FileNotFoundError:
+        pass
+    return name_map
 
 # ---------------------------------------------------------------------------
 # Weather — Open-Meteo (no API key needed)
@@ -90,9 +138,9 @@ def week_label_for_id(week_id: str) -> str:
     return f"Week of {sunday.day}.{sunday.month}.{sunday.year}"
 
 
-def build_week_data(acts: list, members: list, label: str) -> dict:
+def build_week_data(acts: list, members: list, label: str, name_map: dict = None, uc_map: dict = None) -> dict:
     def build(a):
-        s = report_generator.compute_stats(a, members=members)
+        s = report_generator.compute_stats(a, members=members, name_map=name_map, uc_map=uc_map)
         s["label"] = label
         s["count"] = len(a)
         return make_json_safe(s)
@@ -109,7 +157,7 @@ TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>__CLUB_NAME__ – Strava Dashboard</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚴</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>">
 
 <meta property="og:title"       content="__CLUB_NAME__ – Weekly Strava Report">
 <meta property="og:description" content="Live cycling stats for __CLUB_NAME__ from Strava.">
@@ -316,9 +364,10 @@ tbody tr:not(:last-child) { border-bottom: 1px solid #f7f7f7; }
 tbody tr:hover { background: #fafafa; }
 tbody td { padding: 12px 16px; text-align: right; color: #555; white-space: nowrap; }
 tbody td:first-child { text-align: center; width: 40px; color: #999; }
-thead th:nth-child(8), thead th:nth-child(9), thead th:nth-child(10) { text-align: center; }
-tbody td:nth-child(8), tbody td:nth-child(9), tbody td:nth-child(10) { text-align: center; }
+thead th:nth-child(10), thead th:nth-child(11), thead th:nth-child(12) { text-align: center; }
+tbody td:nth-child(10), tbody td:nth-child(11), tbody td:nth-child(12) { text-align: center; }
 tbody td:nth-child(2) { text-align: left; font-weight: 700; color: #1c1c1e; }
+tbody td:nth-child(3), tbody td:nth-child(4) { text-align: left; font-size: .8rem; color: #777; }
 .km-cell { font-weight: 800; color: #FC4C02; }
 .gap-cell { font-size: .78rem; color: #999; }
 .gap-cell.leader { color: #FC4C02; font-weight: 700; font-size: .82rem; }
@@ -386,6 +435,26 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
 }
 .dev-more-btn:hover { border-color: #999; color: #333; }
 
+/* COLUMN FILTER MENU */
+.th-filterable { cursor: pointer; user-select: none; }
+.th-filterable:hover { background: #f0f0f0 !important; color: #444 !important; }
+.th-filterable.filter-active { color: #FC4C02 !important; }
+.filter-menu {
+  position: fixed; background: white; border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.14); border: 1px solid #eee;
+  z-index: 100; min-width: 150px; padding: 4px 0; font-size: .83rem;
+  max-height: 280px; overflow-y: auto;
+}
+.filter-menu-item {
+  padding: 8px 16px; cursor: pointer; color: #444; white-space: nowrap;
+}
+.filter-menu-item:hover { background: #f5f5f5; }
+.filter-menu-item.active { color: #FC4C02; font-weight: 700; }
+
+/* GROUP RANKINGS */
+.group-rankings { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+@media(max-width:600px){ .group-rankings { grid-template-columns: 1fr; } }
+
 /* FOOTER */
 .footer { text-align: center; color: #aaa; font-size: .75rem; margin-top: 8px; }
 .footer a { color: #FC4C02; }
@@ -452,7 +521,7 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
   <div class="header">
     <div class="header-top">
       <div>
-        <h1>🚴 Weekly Report – __CLUB_NAME__</h1>
+        <h1>🏃 Weekly Report – __CLUB_NAME__</h1>
         <div class="sub">
           <span class="dot"></span>
           <span id="period-label"></span>
@@ -464,8 +533,8 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
 
   <div class="controls-row">
     <div class="toggle">
-      <button class="tab" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
-      <button class="tab active" onclick="showMode('week')" id="btn-week">This Week</button>
+      <button class="tab active" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
+      <button class="tab" onclick="showMode('week')" id="btn-week">This Week</button>
       <button class="tab" onclick="showPrevWeek()" id="btn-7days" style="display:none">Last Week</button>
       <div id="daily-tabs" style="display:inline-flex;gap:4px"></div>
       <div class="history-wrap" id="history-wrap" style="display:none">
@@ -503,6 +572,17 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
     <div id="devices" style="display:flex;gap:8px;flex-wrap:wrap"></div>
   </div>
 
+  <div id="group-rankings-section" class="group-rankings">
+    <div>
+      <div class="section-title">Unit Rankings</div>
+      <div class="table-wrap" id="unit-rankings"></div>
+    </div>
+    <div>
+      <div class="section-title">Company Rankings</div>
+      <div class="table-wrap" id="company-rankings"></div>
+    </div>
+  </div>
+
   <div id="leaderboard-section">
     <div class="section-title">Runner Leaderboard</div>
     <div class="table-wrap">
@@ -511,6 +591,8 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
         <tr>
           <th>#</th>
           <th>Runner</th>
+          <th class="th-filterable" id="th-unit"    onclick="toggleFilterMenu('unit', this)">Unit ▾</th>
+          <th class="th-filterable" id="th-company" onclick="toggleFilterMenu('company', this)">Company ▾</th>
           <th class="sortable sort-desc" data-key="km"           onclick="sortBy('km')">km</th>
           <th>Gap</th>
           <th class="sortable" data-key="elev"          onclick="sortBy('elev')">Elevation</th>
@@ -569,6 +651,8 @@ let currentSort        = { key: 'km', dir: -1 };
 let currentHistoryWeek = null;
 let cumulativeMode     = false;
 let currentDailyDate   = null;
+let filterUnit         = '';
+let filterCompany      = '';
 
 function fmtTime(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -590,7 +674,7 @@ function buildCumulative() {
   for (const wk of weeks) {
     const wd = wk['all'];
     for (const r of (wd.leaderboard || [])) {
-      if (!byName[r.name]) byName[r.name] = { name: r.name, km: 0, elev: 0, acts: 0, time_s: 0, ebike: false };
+      if (!byName[r.name]) byName[r.name] = { name: r.name, km: 0, elev: 0, acts: 0, time_s: 0, ebike: false, unit: r.unit||'', company: r.company||'' };
       byName[r.name].km    += r.km;
       byName[r.name].elev  += r.elev;
       byName[r.name].acts  += r.acts;
@@ -746,9 +830,10 @@ function render() {
     esEl.innerHTML = `<h2><span class="es-emoji">${msg.emoji}</span>${msg.title}</h2><p>${msg.body}</p>${bottomHtml}`;
   }
   esEl.style.display = isEmpty ? '' : 'none';
-  document.getElementById('totals-section').style.display    = isEmpty ? 'none' : '';
-  document.getElementById('awards-section').style.display    = isEmpty ? 'none' : '';
-  document.getElementById('leaderboard-section').style.display = isEmpty ? 'none' : '';
+  document.getElementById('totals-section').style.display         = isEmpty ? 'none' : '';
+  document.getElementById('awards-section').style.display         = isEmpty ? 'none' : '';
+  document.getElementById('leaderboard-section').style.display    = isEmpty ? 'none' : '';
+  document.getElementById('group-rankings-section').style.display = isEmpty ? 'none' : '';
   if (isEmpty) {
     document.getElementById('fun-section').style.display    = 'none';
     document.getElementById('device-section').style.display = 'none';
@@ -797,15 +882,93 @@ function render() {
   }).join('');
 
   renderLeaderboard(data);
+  renderGroupRankings(data);
 }
 
+let _openFilterKey = null;
+
+function toggleFilterMenu(key, th) {
+  const wasOpen = _openFilterKey === key;
+  closeFilterMenu();
+  if (wasOpen) return;
+  _openFilterKey = key;
+  const all = d().leaderboard || [];
+  const values = [...new Set(all.map(r => r[key]).filter(Boolean))].sort();
+  const current = key === 'unit' ? filterUnit : filterCompany;
+  const menu = document.createElement('div');
+  menu.className = 'filter-menu';
+  menu.id = 'active-filter-menu';
+  const allItem = document.createElement('div');
+  allItem.className = 'filter-menu-item' + (current === '' ? ' active' : '');
+  allItem.textContent = 'All ' + (key === 'unit' ? 'Units' : 'Companies');
+  allItem.onclick = e => { e.stopPropagation(); setFilter(key, ''); };
+  menu.appendChild(allItem);
+  values.forEach(v => {
+    const item = document.createElement('div');
+    item.className = 'filter-menu-item' + (v === current ? ' active' : '');
+    item.textContent = v;
+    item.onclick = e => { e.stopPropagation(); setFilter(key, v); };
+    menu.appendChild(item);
+  });
+  document.body.appendChild(menu);
+  const rect = th.getBoundingClientRect();
+  const mw   = menu.offsetWidth;
+  const left  = Math.min(rect.left, window.innerWidth - mw - 8);
+  menu.style.top  = (rect.bottom + 4) + 'px';
+  menu.style.left = Math.max(8, left) + 'px';
+}
+
+function setFilter(key, value) {
+  if (key === 'unit') filterUnit = value;
+  else filterCompany = value;
+  closeFilterMenu();
+  renderLeaderboard(d());
+}
+
+function closeFilterMenu() {
+  const m = document.getElementById('active-filter-menu');
+  if (m) m.remove();
+  _openFilterKey = null;
+  ['unit', 'company'].forEach(k => {
+    const th = document.getElementById('th-' + k);
+    if (th) th.classList.toggle('filter-active', k === 'unit' ? !!filterUnit : !!filterCompany);
+  });
+}
+
+document.addEventListener('click', e => {
+  if (_openFilterKey &&
+      !e.target.closest('#active-filter-menu') &&
+      !e.target.closest('#th-unit') &&
+      !e.target.closest('#th-company')) {
+    closeFilterMenu();
+  }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFilterMenu(); });
+
 function renderLeaderboard(data) {
-  const rows = sortedLeaderboard(data.leaderboard || []);
+  const all = data.leaderboard || [];
+  // self-heal: reset filter if its value no longer exists in current dataset
+  const units     = new Set(all.map(r => r.unit).filter(Boolean));
+  const companies = new Set(all.map(r => r.company).filter(Boolean));
+  if (filterUnit    && !units.has(filterUnit))        filterUnit    = '';
+  if (filterCompany && !companies.has(filterCompany)) filterCompany = '';
+  // sync header active state
+  ['unit', 'company'].forEach(k => {
+    const th = document.getElementById('th-' + k);
+    if (th) th.classList.toggle('filter-active', k === 'unit' ? !!filterUnit : !!filterCompany);
+  });
+  // apply filters then sort
+  let rows = all;
+  if (filterUnit)    rows = rows.filter(r => r.unit    === filterUnit);
+  if (filterCompany) rows = rows.filter(r => r.company === filterCompany);
+  rows = sortedLeaderboard(rows);
   const isByKm = currentSort.key === 'km';
   document.getElementById('leaderboard').innerHTML = rows.map((r, i) => `
     <tr>
       <td>${isByKm && MEDALS[i] ? MEDALS[i] : '<span style="color:#ccc;font-size:.75rem">'+(i+1)+'</span>'}</td>
       <td>${esc(r.name)}${r.ebike ? ' <span title="Mostly e-bike" style="font-size:.8rem;opacity:.6">⚡</span>' : ''}</td>
+      <td>${esc(r.unit||'')}</td>
+      <td>${esc(r.company||'')}</td>
       <td class="km-cell">${r.km}</td>
       <td class="gap-cell ${r.gap==='leader'?'leader':''}">${r.gap}</td>
       <td>${r.elev} m</td>
@@ -814,7 +977,32 @@ function renderLeaderboard(data) {
       <td>${r.acts}</td>
       <td>${r.avg_speed}</td>
       <td>${r.longest != null ? r.longest + ' km' : '–'}</td>
-    </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:#ccc;padding:20px">No activities</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="12" style="text-align:center;color:#ccc;padding:20px">No activities</td></tr>';
+}
+
+function renderGroupRankings(data) {
+  function groupBy(key) {
+    const map = {};
+    for (const r of (data.leaderboard || [])) {
+      const k = r[key]; if (!k) continue;
+      if (!map[k]) map[k] = { name: k, km: 0, runners: 0 };
+      map[k].km += r.km;
+      if (r.acts > 0) map[k].runners++;
+    }
+    return Object.values(map).sort((a, b) => b.km - a.km);
+  }
+  function tableHtml(groups, label) {
+    if (!groups.length) return `<p style="color:#ccc;padding:16px;text-align:center;font-size:.82rem">No ${label} data</p>`;
+    return `<table><thead><tr><th>#</th><th style="text-align:left">${label}</th><th>km</th><th>Runners</th></tr></thead><tbody>` +
+      groups.map((g, i) => `<tr>
+        <td>${MEDALS[i]||'<span style="color:#ccc;font-size:.75rem">'+(i+1)+'</span>'}</td>
+        <td style="text-align:left;font-weight:700">${esc(g.name)}</td>
+        <td class="km-cell">${Math.round(g.km * 10) / 10}</td>
+        <td style="text-align:center">${g.runners}</td>
+      </tr>`).join('') + '</tbody></table>';
+  }
+  document.getElementById('unit-rankings').innerHTML    = tableHtml(groupBy('unit'),    'Unit');
+  document.getElementById('company-rankings').innerHTML = tableHtml(groupBy('company'), 'Company');
 }
 
 function showMode(mode) {
@@ -877,7 +1065,7 @@ function showDailySnapshot(date) {
 
 
 document.getElementById('btn-week').textContent = 'Week of ' + sundayOfWeek('__CURRENT_WEEK_ID__');
-render();
+showLeaderboard();
 </script>
 </body>
 </html>
@@ -971,8 +1159,10 @@ def generate():
     print("  Fetching all club activities...")
     activities = strava_client.fetch_club_activities(token)
 
+    name_map = load_name_map()
+    uc_map   = load_unit_company_map()
     label = week_label_for_id(week_id)
-    week_data = build_week_data(activities, members, label)
+    week_data = build_week_data(activities, members, label, name_map, uc_map)
     save_week_history(week_id, label, week_data)
 
     today = datetime.now(_TZ8)

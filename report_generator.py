@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 
-def compute_stats(activities: list, members: list = None) -> dict:
+def compute_stats(activities: list, members: list = None, name_map: dict = None, uc_map: dict = None) -> dict:
     """
     Compute all statistics from club activities.
     members: optional member list (for building Strava profile links).
@@ -12,10 +12,9 @@ def compute_stats(activities: list, members: list = None) -> dict:
     member_map = {}
     if members:
         for m in members:
-            key = f"{m.get('firstname', '')} {m.get('lastname', '')}".strip()
+            key = f"{m.get('firstname', '')} {m.get('lastname', '')}".strip().lower()
             if m.get("id"):
                 member_map[key] = m["id"]
-
     if not activities:
         return {}
 
@@ -56,6 +55,8 @@ def compute_stats(activities: list, members: list = None) -> dict:
         is_ebike = act.get("type") == "EBikeRide"
         if name not in athlete_id and name in member_map:
             athlete_id[name] = member_map[name]
+        if name_map:
+            name = name_map.get(name.lower().strip(), name)
 
         elapsed_s = act.get("elapsed_time", 0)
         dev = act.get("device_name", "")
@@ -172,6 +173,8 @@ def compute_stats(activities: list, members: list = None) -> dict:
             "gap": f"–{gap:.1f}" if gap > 0 else "leader",
             "ebike": mostly_ebike,
             "elev_per_km": round(athlete_elev[name] / km, 1) if km > 0 else None,
+            "unit":    uc_map.get(name, {}).get("unit", "")    if uc_map else "",
+            "company": uc_map.get(name, {}).get("company", "") if uc_map else "",
         })
 
     # Add zero-row entries for members with no activities this period
@@ -179,6 +182,8 @@ def compute_stats(activities: list, members: list = None) -> dict:
     if members:
         for m in members:
             name = f"{m.get('firstname', '')} {m.get('lastname', '')}".strip()
+            if name_map:
+                name = name_map.get(name.lower().strip(), name)
             if name and name not in active_names:
                 leaderboard.append({
                     "name": name,
@@ -194,6 +199,8 @@ def compute_stats(activities: list, members: list = None) -> dict:
                     "gap": f"–{leader_km:.1f}" if leader_km > 0 else "leader",
                     "ebike": False,
                     "elev_per_km": None,
+                    "unit":    uc_map.get(name, {}).get("unit", "")    if uc_map else "",
+                    "company": uc_map.get(name, {}).get("company", "") if uc_map else "",
                 })
 
     def award(rank, val_fn):

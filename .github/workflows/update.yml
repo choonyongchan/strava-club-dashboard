@@ -42,7 +42,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add dashboard/
-          git diff --cached --quiet || git commit -m "🚴 Dashboard update $(date +'%d.%m.%Y %H:%M')"
+          git diff --cached --quiet || git commit -m "🏃 Dashboard update $(date +'%d.%m.%Y %H:%M')"
           git pull --rebase
           for i in 1 2 3; do
             git push && break || { echo "Push failed (attempt $i/3), waiting 15s..."; sleep 15; git pull --rebase; }
