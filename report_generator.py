@@ -28,7 +28,6 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
     athlete_longest: dict  = defaultdict(float)
     athlete_id: dict = {}
     athlete_ebike_acts: dict = defaultdict(int)
-    athlete_elapsed_time: dict = defaultdict(float)
     athlete_devices: dict = defaultdict(set)
 
     # Stats excluding e-bike runs — used for awards
@@ -58,16 +57,14 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
         if name_map:
             name = name_map.get(name.lower().strip(), name)
 
-        elapsed_s = act.get("elapsed_time", 0)
         dev = act.get("device_name", "")
 
         total_km += dist_km
         total_elev += elev
-        athlete_km[name]           += dist_km
-        athlete_elev[name]         += elev
-        athlete_time[name]         += time_s
-        athlete_elapsed_time[name] += elapsed_s
-        athlete_count_acts[name]   += 1
+        athlete_km[name]         += dist_km
+        athlete_elev[name]       += elev
+        athlete_time[name]       += time_s
+        athlete_count_acts[name] += 1
         if is_ebike:
             athlete_ebike_acts[name] += 1
         if dist_km > athlete_longest[name]:
@@ -134,21 +131,13 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
         if d
     ]
 
-    km_rank    = top(athlete_km)
-    elev_rank  = top(athlete_elev)
-    time_rank  = top(athlete_time)
-    snail_rank = top(avg_speeds, reverse=False)
-    fast_rank  = top(avg_speeds)
-    acts_rank  = top(athlete_count_acts)
-    long_rank  = top(athlete_longest)
+    km_rank = top(athlete_km)
 
     # Award rankings — non-ebike activities only
     award_km_rank    = top(award_km)
     award_elev_rank  = top(award_elev)
     award_time_rank  = top(award_time)
-    award_snail_rank = top(award_avg_speeds, reverse=False)
     award_fast_rank  = top(award_avg_speeds)
-    award_acts_rank  = top(award_count_acts)
     award_long_rank  = top(award_longest)
 
     # Leaderboard — all runners sorted by km
@@ -238,26 +227,23 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
     break_rank   = top(break_time)
     climber_rank = top(elev_per_km)
 
-    def fun(name, value, tip):
-        return {"name": name, "value": value, "tip": tip}
+    def fun(name, value):
+        return {"name": name, "value": value}
 
     fun_stats = {
         "virtual": fun(
             top(virtual_counts)[0][0] if virtual_counts else None,
             f"{top(virtual_counts)[0][1]}x Zwift/Rouvy",
-            "Their treadmill has never seen rain or sun. Runs in slippers."
         ) if virtual_counts else None,
 
         "ebike": fun(
             top(ebike_counts)[0][0] if ebike_counts else None,
             f"{top(ebike_counts)[0][1]}x e-bike",
-            "Saving legs, spending battery."
         ) if ebike_counts else None,
 
         "breaks": fun(
             break_rank[0][0],
             f"{int(break_rank[0][1]//60)} min of rest",
-            "Coffee breaks don't take themselves."
         ) if break_rank and break_rank[0][1] > 60 else None,
     }
 
@@ -287,9 +273,7 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
         "king_km":     award(award_km_rank,    lambda v: f"{v:.1f} km"),
         "king_elev":   award(award_elev_rank,  lambda v: f"{v:,.0f} m elevation".replace(",", " ")),
         "marathoner":  award(award_time_rank,  lambda v: fmt_time(v)),
-        "snail":       award(award_snail_rank, lambda v: spd_kmh(v)),
         "fastest":     award(award_fast_rank,  lambda v: spd_kmh(v)),
-        "most_acts":   award(award_acts_rank,  lambda v: f"{v} runs"),
         "longest":     award(award_long_rank,  lambda v: f"{v:.1f} km"),
         "climber":     climber_award,
         "flatrunner":  flatrunner_award,

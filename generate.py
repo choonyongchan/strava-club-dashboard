@@ -105,15 +105,18 @@ def fetch_weather() -> dict:
 # Timestamp in configured timezone
 # ---------------------------------------------------------------------------
 
-def now_label() -> tuple:
-    """Return (iso_str, human_label) in configured timezone."""
+def _now_tz() -> datetime:
+    """Return current time in configured timezone, falling back to UTC."""
     try:
         import pytz
-        tz = pytz.timezone(config.TIMEZONE)
-        now = datetime.now(tz)
+        return datetime.now(pytz.timezone(config.TIMEZONE))
     except Exception:
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
+        return datetime.now(timezone.utc)
+
+
+def now_label() -> tuple:
+    """Return (iso_str, human_label) in configured timezone."""
+    now = _now_tz()
     iso = now.strftime("%Y-%m-%dT%H:%M")
     human = f"{now.day}.{now.month}.{now.year} {now.hour:02}:{now.minute:02}"
     return iso, human
@@ -1077,14 +1080,7 @@ showLeaderboard();
 
 def get_week_id() -> str:
     """Return ISO week id for current week in configured timezone, e.g. '2026-W09'."""
-    try:
-        import pytz
-        tz = pytz.timezone(config.TIMEZONE)
-        now = datetime.now(tz)
-    except Exception:
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
-    iso = now.isocalendar()
+    iso = _now_tz().isocalendar()
     return f"{iso[0]}-W{iso[1]:02d}"
 
 
@@ -1221,11 +1217,3 @@ def generate():
 
 if __name__ == "__main__":
     generate()
-    # try:
-    #     generate()
-    # except strava_client.StravaAuthError as e:
-    #     print(f"\n⚠️  STRAVA AUTH ERROR: {e}")
-    #     print("Dashboard not updated. Skipping this run.")
-    # except Exception as e:
-    #     print(f"\n⚠️  UNEXPECTED ERROR: {e}")
-    #     print("Dashboard not updated. Skipping this run.")
