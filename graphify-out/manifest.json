@@ -1,0 +1,142 @@
+{
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\.claude\\settings.local.json": {
+    "mtime": 1783266512.6857662,
+    "ast_hash": "c687cacf5f7a2e6f1f85ed0629f996db",
+    "semantic_hash": "c687cacf5f7a2e6f1f85ed0629f996db"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\config.py": {
+    "mtime": 1782206175.5507612,
+    "ast_hash": "9d3fcbb41e0194d4f38dc5ece270f529",
+    "semantic_hash": "9d3fcbb41e0194d4f38dc5ece270f529"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\2026-W26.json": {
+    "mtime": 1783266766.1170824,
+    "ast_hash": "8a8f0341ee1cafcb0c7ca53e9e404d8b",
+    "semantic_hash": "8a8f0341ee1cafcb0c7ca53e9e404d8b"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\2026-W27.json": {
+    "mtime": 1783266766.1190908,
+    "ast_hash": "df7e4e6ca24ca1b9a04ae7d5c3d3b323",
+    "semantic_hash": "df7e4e6ca24ca1b9a04ae7d5c3d3b323"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-06-24.json": {
+    "mtime": 1783266766.1210866,
+    "ast_hash": "6d3f38777a0c1486556458cf0da04079",
+    "semantic_hash": "6d3f38777a0c1486556458cf0da04079"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-06-25.json": {
+    "mtime": 1783266766.1220965,
+    "ast_hash": "4c81ed88e94948e2a0821ef18d896cfa",
+    "semantic_hash": "4c81ed88e94948e2a0821ef18d896cfa"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-06-26.json": {
+    "mtime": 1783266766.1220965,
+    "ast_hash": "a551980458242e87337a044134d00867",
+    "semantic_hash": "a551980458242e87337a044134d00867"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-06-27.json": {
+    "mtime": 1783266766.1270785,
+    "ast_hash": "aff04ed49ef4d7a34f5e51ae6ed4fe53",
+    "semantic_hash": "aff04ed49ef4d7a34f5e51ae6ed4fe53"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-06-28.json": {
+    "mtime": 1783266766.128085,
+    "ast_hash": "e76c156eed3eb2a3f16c4f7714f2c71f",
+    "semantic_hash": "e76c156eed3eb2a3f16c4f7714f2c71f"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-06-29.json": {
+    "mtime": 1783266766.1296065,
+    "ast_hash": "cc4060dcfc08ffe5afaa57dbb110ad5e",
+    "semantic_hash": "cc4060dcfc08ffe5afaa57dbb110ad5e"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-06-30.json": {
+    "mtime": 1783266766.1306276,
+    "ast_hash": "65f71f499bec24e68b192a8000fa3cd2",
+    "semantic_hash": "65f71f499bec24e68b192a8000fa3cd2"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-07-01.json": {
+    "mtime": 1783266766.1306276,
+    "ast_hash": "4e792703f3c35fa1bd349520c204db26",
+    "semantic_hash": "4e792703f3c35fa1bd349520c204db26"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-07-02.json": {
+    "mtime": 1783266766.1327133,
+    "ast_hash": "30e6bb072d87a56d8dae35c976b2ca14",
+    "semantic_hash": "30e6bb072d87a56d8dae35c976b2ca14"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-07-03.json": {
+    "mtime": 1783266766.1327133,
+    "ast_hash": "18988c7307efdaace1250476f28ad3c0",
+    "semantic_hash": "18988c7307efdaace1250476f28ad3c0"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-07-04.json": {
+    "mtime": 1783266766.1327133,
+    "ast_hash": "295fbf6481205e9333f34bf560b9ad85",
+    "semantic_hash": "295fbf6481205e9333f34bf560b9ad85"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\history\\daily\\2026-07-05.json": {
+    "mtime": 1783266766.1327133,
+    "ast_hash": "e9fb52871ccd21da2471e30d77ea690e",
+    "semantic_hash": "e9fb52871ccd21da2471e30d77ea690e"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\generate.py": {
+    "mtime": 1783266941.6587627,
+    "ast_hash": "cbc0e40beef8d407005890929dd3dc28",
+    "semantic_hash": "cbc0e40beef8d407005890929dd3dc28"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\report_generator.py": {
+    "mtime": 1783266919.676558,
+    "ast_hash": "5d8b6219597797cef6c3e6007fae9a6b",
+    "semantic_hash": "5d8b6219597797cef6c3e6007fae9a6b"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\setup_strava.py": {
+    "mtime": 1782206175.5617635,
+    "ast_hash": "a0f4b7a34540f01870b8a1b688e4acd6",
+    "semantic_hash": "a0f4b7a34540f01870b8a1b688e4acd6"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\strava_client.py": {
+    "mtime": 1782206175.562751,
+    "ast_hash": "b8d97d7ae165a05308679d31854b6a42",
+    "semantic_hash": "b8d97d7ae165a05308679d31854b6a42"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\.github\\workflows\\pages.yml": {
+    "mtime": 1783266766.1120634,
+    "ast_hash": "1120b22a1bcf7c14e22d92e239f1f7be",
+    "semantic_hash": "1120b22a1bcf7c14e22d92e239f1f7be"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\.github\\workflows\\update.yml": {
+    "mtime": 1783266766.1130576,
+    "ast_hash": "98b5c92bab52f53fa883419fcb83dbf2",
+    "semantic_hash": "98b5c92bab52f53fa883419fcb83dbf2"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\CLAUDE.md": {
+    "mtime": 1783266766.116095,
+    "ast_hash": "23ff20a1e4676fd47a73b913ade0c6b9",
+    "semantic_hash": "23ff20a1e4676fd47a73b913ade0c6b9"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\README.md": {
+    "mtime": 1782283204.8941176,
+    "ast_hash": "c9bc87d42d93104dedc8b973a632aac7",
+    "semantic_hash": "c9bc87d42d93104dedc8b973a632aac7"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\dashboard\\index.html": {
+    "mtime": 1783266766.1327133,
+    "ast_hash": "cae159a6086d11fdcae3bb1430832208",
+    "semantic_hash": "cae159a6086d11fdcae3bb1430832208"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\requirements.txt": {
+    "mtime": 1782206175.5587516,
+    "ast_hash": "be244e57b9b9e058f98ebb959d7e3f73",
+    "semantic_hash": "be244e57b9b9e058f98ebb959d7e3f73"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\todo.md": {
+    "mtime": 1783266766.1327133,
+    "ast_hash": "5f8a39455e84d6c06523382325424b8c",
+    "semantic_hash": "5f8a39455e84d6c06523382325424b8c"
+  },
+  "C:\\Users\\Administrator\\Documents\\Projects\\strava-club-dashboard\\screenshot.webp": {
+    "mtime": 1782206175.560753,
+    "ast_hash": "0727784f5954cfb39e0b0ba33cdfb2af",
+    "semantic_hash": "0727784f5954cfb39e0b0ba33cdfb2af"
+  }
+}
