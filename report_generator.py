@@ -266,7 +266,7 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
         "total_km": total_km,
         "total_elev": total_elev,
         "run_count": len(activities),
-        "athlete_count": len(athlete_km),
+        "athlete_count": len(members) if members else len(athlete_km),
         "leaderboard": leaderboard,
         "fun_stats": fun_stats,
         # Main awards — non-ebike activities only

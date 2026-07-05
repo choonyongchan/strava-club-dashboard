@@ -122,25 +122,6 @@ def now_label() -> tuple:
     return iso, human
 
 
-# ---------------------------------------------------------------------------
-# Week helpers
-# ---------------------------------------------------------------------------
-
-_TZ8 = timezone(timedelta(hours=8))
-
-
-
-def week_label_for_id(week_id: str) -> str:
-    year, wnum = int(week_id[:4]), int(week_id[6:])
-    jan4 = datetime(year, 1, 4, tzinfo=_TZ8)
-    monday = jan4 - timedelta(days=jan4.weekday()) + timedelta(weeks=wnum - 1)
-    sunday = monday - timedelta(days=1)  # week starts on Sunday
-    if week_id == get_week_id():
-        now = datetime.now(_TZ8)
-        return f"{sunday.day}.{sunday.month} – {now.day}.{now.month}.{now.year}"
-    return f"Week of {sunday.day}.{sunday.month}.{sunday.year}"
-
-
 def build_week_data(acts: list, members: list, label: str, name_map: dict = None, uc_map: dict = None) -> dict:
     def build(a):
         s = report_generator.compute_stats(a, members=members, name_map=name_map, uc_map=uc_map)
@@ -640,9 +621,7 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
 
 <script>
 const DATA = __DATA__;
-const HISTORY = __HISTORY_DATA__;
 const DAILY   = __DAILY_DATA__;
-const PREV_WEEK_ID = '__PREV_WEEK_ID__';
 const MEDALS = ['🥇','🥈','🥉'];
 const AWARDS = [
   { key:'king_km',      emoji:'👑', title:'Distance King',   muted:false },
@@ -670,8 +649,6 @@ const EMPTY_MSGS = [
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 let currentSort        = { key: 'km', dir: -1 };
-let currentHistoryWeek = null;
-let cumulativeMode     = false;
 let currentDailyDate   = null;
 let calendarMonth      = null; // 'YYYY-MM', set on first render
 let filterUnit         = '';
@@ -682,55 +659,9 @@ function fmtTime(s) {
   return `${h}h ${m < 10 ? '0' : ''}${m}m`;
 }
 
-function sundayOfWeek(weekId) {
-  const [yr, w] = weekId.split('-W').map(Number);
-  const jan4 = new Date(yr, 0, 4);
-  const dow = jan4.getDay() || 7;
-  const mon1 = new Date(jan4); mon1.setDate(jan4.getDate() - dow + 1);
-  const sun = new Date(mon1); sun.setDate(mon1.getDate() + (w - 1) * 7 + 6);
-  return sun.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function buildCumulative() {
-  const weeks = [DATA['week'], ...Object.values(HISTORY)];
-  const byName = {};
-  for (const wk of weeks) {
-    const wd = wk['all'];
-    for (const r of (wd.leaderboard || [])) {
-      if (!byName[r.name]) byName[r.name] = { name: r.name, km: 0, elev: 0, acts: 0, time_s: 0, ebike: false, unit: r.unit||'', company: r.company||'' };
-      byName[r.name].km    += r.km;
-      byName[r.name].elev  += r.elev;
-      byName[r.name].acts  += r.acts;
-      byName[r.name].time_s += r.time_s;
-      if (r.ebike) byName[r.name].ebike = true;
-    }
-  }
-  const rows = Object.values(byName).sort((a, b) => b.km - a.km);
-  rows.forEach((r, i) => {
-    r.km          = Math.round(r.km * 10) / 10;
-    r.elev        = Math.round(r.elev);
-    r.gap         = i === 0 ? 'leader' : `–${(rows[0].km - r.km).toFixed(1)}`;
-    r.time        = fmtTime(r.time_s);
-    r.elev_per_km = r.km > 0 ? Math.round(r.elev / r.km * 10) / 10 : 0;
-    r.avg_speed_ms = r.time_s > 0 ? r.km / (r.time_s / 3600) / 3.6 : 0;
-    r.avg_speed   = r.time_s > 0 ? (r.km / (r.time_s / 3600)).toFixed(1) + ' km/h' : '–';
-    r.longest     = null; // ponytail: doesn't aggregate meaningfully
-  });
-  return {
-    leaderboard:   rows,
-    total_km:      rows.reduce((s, r) => s + r.km, 0),
-    total_elev:    rows.reduce((s, r) => s + r.elev, 0),
-    run_count:     rows.reduce((s, r) => s + r.acts, 0),
-    athlete_count: rows.length,
-    label:         '',
-  };
-}
-
 function d() {
-  if (currentDailyDate)  return DAILY[currentDailyDate]['all'];
-  if (cumulativeMode)    return buildCumulative();
-  if (currentHistoryWeek) return HISTORY[currentHistoryWeek]['all'];
-  return DATA['week']['all'];
+  if (currentDailyDate) return DAILY[currentDailyDate]['all'];
+  return DATA['today']['all'];
 }
 
 function toggleHistoryPicker(e) {
@@ -772,7 +703,8 @@ function sortedLeaderboard(rows) {
   });
 }
 
-function changeCalendarMonth(delta) {
+function changeCalendarMonth(delta, e) {
+  e.stopPropagation();
   const [y, m] = calendarMonth.split('-').map(Number);
   const nd = new Date(y, m - 1 + delta, 1);
   calendarMonth = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`;
@@ -788,11 +720,10 @@ function renderDayCalendar() {
   const minMonth = dailyKeys.length ? dailyKeys.sort()[0].slice(0, 7) : calendarMonth;
   const maxMonth = dailyKeys.length ? dailyKeys.sort().at(-1).slice(0, 7) : calendarMonth;
 
-  let html = `<div class="hist-year-label">Days</div>
-    <div class="hist-cal-header">
-      <button class="hist-cal-nav" onclick="changeCalendarMonth(-1)" ${calendarMonth <= minMonth ? 'disabled' : ''}>‹</button>
+  let html = `<div class="hist-cal-header">
+      <button class="hist-cal-nav" onclick="changeCalendarMonth(-1, event)" ${calendarMonth <= minMonth ? 'disabled' : ''}>‹</button>
       <div class="hist-cal-month">${monthLabel}</div>
-      <button class="hist-cal-nav" onclick="changeCalendarMonth(1)" ${calendarMonth >= maxMonth ? 'disabled' : ''}>›</button>
+      <button class="hist-cal-nav" onclick="changeCalendarMonth(1, event)" ${calendarMonth >= maxMonth ? 'disabled' : ''}>›</button>
     </div>
     <div class="hist-cal-weekdays">${['S','M','T','W','T','F','S'].map(d => `<div>${d}</div>`).join('')}</div>
     <div class="hist-grid hist-cal-grid">`;
@@ -818,13 +749,8 @@ function render() {
   const data = d();
   if (currentDailyDate) {
     document.getElementById('period-label').textContent = DAILY[currentDailyDate].label;
-  } else if (cumulativeMode) {
-    document.getElementById('period-label').textContent = `Cumulative · Week of ${sundayOfWeek('__CURRENT_WEEK_ID__')}`;
-  } else if (currentHistoryWeek) {
-    document.getElementById('period-label').textContent = data.label;
   } else {
-    const _wNum = parseInt('__CURRENT_WEEK_ID__'.split('-W')[1] || '0');
-    document.getElementById('period-label').textContent = `Week ${_wNum}  ·  ${data.label}`;
+    document.getElementById('period-label').textContent = `Cumulative · as of ${data.label}`;
   }
 
   document.getElementById('totals').innerHTML = [
@@ -883,14 +809,13 @@ function render() {
   const isEmpty = !data.run_count;
   const esEl = document.getElementById('empty-state');
   if (isEmpty) {
-    const wNum = parseInt('__CURRENT_WEEK_ID__'.split('-W')[1] || '1');
+    const daySeed = new Date().getDate();
     let msg, bottomHtml;
-    const hasPrev = PREV_WEEK_ID && HISTORY[PREV_WEEK_ID];
-    const hasHistory = Object.keys(HISTORY).length > 0;
+    const hasPrev = Object.keys(DAILY).length > 0;
     const archiveHtml = hasPrev
-      ? `Check out <a onclick="showPrevWeek()">last week's results</a>${hasHistory ? ` or <a onclick="toggleHistoryPicker(event)">older archives</a>` : ''}.`
-      : (hasHistory ? `Browse <a onclick="toggleHistoryPicker(event)">older results</a> in the archive.` : '');
-    msg = EMPTY_MSGS[wNum % EMPTY_MSGS.length];
+      ? `Check out <a onclick="showPrevWeek()">last week's results</a> or <a onclick="toggleHistoryPicker(event)">older archives</a>.`
+      : '';
+    msg = EMPTY_MSGS[daySeed % EMPTY_MSGS.length];
     bottomHtml = `<div class="es-divider"></div>${archiveHtml ? `<div class="es-action">${archiveHtml}</div>` : ''}<div class="es-hint">This page updates every hour.</div>`;
     esEl.innerHTML = `<h2><span class="es-emoji">${msg.emoji}</span>${msg.title}</h2><p>${msg.body}</p>${bottomHtml}`;
   }
@@ -903,45 +828,16 @@ function render() {
     document.getElementById('fun-section').style.display    = 'none';
     document.getElementById('device-section').style.display = 'none';
   }
-  if (cumulativeMode) {
-    document.getElementById('awards-section').style.display  = 'none';
-    document.getElementById('fun-section').style.display     = 'none';
-    document.getElementById('device-section').style.display  = 'none';
-  }
-
-  // History picker — populate day calendar + week grids
-  const histKeys = new Set(Object.keys(HISTORY));
+  // History picker — populate day calendar
   const dailyKeys = Object.keys(DAILY);
-  const currentWid = '__CURRENT_WEEK_ID__';
-  document.getElementById('history-wrap').style.display = (histKeys.size || dailyKeys.length) ? '' : 'none';
-  if (PREV_WEEK_ID && HISTORY[PREV_WEEK_ID]) {
+  document.getElementById('history-wrap').style.display = dailyKeys.length ? '' : 'none';
+  if (dailyKeys.length) {
     document.getElementById('btn-7days').style.display = '';
   }
   if (!calendarMonth) {
     calendarMonth = (dailyKeys.length ? dailyKeys.sort().at(-1) : new Date().toISOString()).slice(0, 7);
   }
-  const years = new Set([parseInt(currentWid.split('-W')[0])]);
-  histKeys.forEach(k => years.add(parseInt(k.split('-W')[0])));
-  let pickerHtml = renderDayCalendar();
-  [...years].sort().forEach(year => {
-    pickerHtml += `<div class="hist-year-label">${year}</div><div class="hist-grid">`;
-    for (let w = 1; w <= 52; w++) {
-      const wid = `${year}-W${String(w).padStart(2,'0')}`;
-      const hasData = histKeys.has(wid);
-      const isCurrent = wid === currentWid;
-      const isActive = wid === currentHistoryWeek;
-      let cls = 'hist-cell';
-      if (isActive) cls += ' active';
-      else if (hasData) cls += ' has-data';
-      else if (isCurrent) cls += ' current';
-      else cls += ' empty';
-      const tip = hasData ? `title="${HISTORY[wid].label}"` : (isCurrent ? 'title="Current week"' : '');
-      const click = hasData ? `onclick="showHistoryWeek('${wid}')"` : '';
-      pickerHtml += `<div class="${cls}" ${tip} ${click}>${w}</div>`;
-    }
-    pickerHtml += '</div>';
-  });
-  document.getElementById('history-picker-list').innerHTML = pickerHtml;
+  document.getElementById('history-picker-list').innerHTML = renderDayCalendar();
 
   renderLeaderboard(data);
   renderGroupRankings(data);
@@ -1047,52 +943,39 @@ function renderGroupRankings(data) {
     const map = {};
     for (const r of (data.leaderboard || [])) {
       const k = r[key]; if (!k) continue;
-      if (!map[k]) map[k] = { name: k, km: 0, runners: 0 };
+      if (!map[k]) map[k] = { name: k, km: 0, runners: 0, unit: r.unit };
       map[k].km += r.km;
       if (r.acts > 0) map[k].runners++;
     }
     return Object.values(map).sort((a, b) => b.km - a.km);
   }
-  function tableHtml(groups, label) {
+  function tableHtml(groups, label, showUnit) {
     if (!groups.length) return `<p style="color:#ccc;padding:16px;text-align:center;font-size:.82rem">No ${label} data</p>`;
     return `<table><thead><tr><th>#</th><th style="text-align:left">${label}</th><th>km</th><th>Runners</th></tr></thead><tbody>` +
       groups.map((g, i) => `<tr>
         <td>${MEDALS[i]||'<span style="color:#ccc;font-size:.75rem">'+(i+1)+'</span>'}</td>
-        <td style="text-align:left;font-weight:700">${esc(g.name)}</td>
+        <td style="text-align:left;font-weight:700">${esc(g.name)}${showUnit && g.unit ? `<sub>${esc(g.unit)}</sub>` : ''}</td>
         <td class="km-cell">${Math.round(g.km * 10) / 10}</td>
         <td style="text-align:center">${g.runners}</td>
       </tr>`).join('') + '</tbody></table>';
   }
   document.getElementById('unit-rankings').innerHTML    = tableHtml(groupBy('unit'),    'Unit');
-  document.getElementById('company-rankings').innerHTML = tableHtml(groupBy('company'), 'Company');
+  document.getElementById('company-rankings').innerHTML = tableHtml(groupBy('company'), 'Company', true);
 }
 
 function showPrevWeek() {
-  if (!PREV_WEEK_ID) return;
-  cumulativeMode = false;
-  currentHistoryWeek = PREV_WEEK_ID;
-  currentDailyDate = null;
+  // Latest Saturday on/before today (Saturday itself if today is one).
+  const now = new Date();
+  const daysSinceSat = (now.getDay() + 1) % 7;
+  const sat = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceSat);
+  const satStr = `${sat.getFullYear()}-${String(sat.getMonth() + 1).padStart(2, '0')}-${String(sat.getDate()).padStart(2, '0')}`;
+  const key = Object.keys(DAILY).sort().filter(k => k <= satStr).at(-1);
+  if (!key) return;
+  showDailySnapshot(key);
   document.getElementById('btn-7days').classList.add('active');
-  document.getElementById('btn-history').classList.remove('active');
-  document.getElementById('btn-leaderboard').classList.remove('active');
-  render();
-}
-
-function showHistoryWeek(weekId) {
-  cumulativeMode = false;
-  currentHistoryWeek = weekId;
-  currentDailyDate = null;
-  closeHistoryPicker();
-  const isPrevWeek = weekId === PREV_WEEK_ID;
-  document.getElementById('btn-7days').classList.toggle('active', isPrevWeek);
-  document.getElementById('btn-history').classList.toggle('active', !isPrevWeek);
-  document.getElementById('btn-leaderboard').classList.remove('active');
-  render();
 }
 
 function showLeaderboard() {
-  cumulativeMode = true;
-  currentHistoryWeek = null;
   currentDailyDate = null;
   document.getElementById('btn-7days').classList.remove('active');
   document.getElementById('btn-history').classList.remove('active');
@@ -1102,8 +985,6 @@ function showLeaderboard() {
 
 function showDailySnapshot(date) {
   currentDailyDate = date;
-  cumulativeMode = false;
-  currentHistoryWeek = null;
   closeHistoryPicker();
   document.getElementById('btn-7days').classList.remove('active');
   document.getElementById('btn-history').classList.remove('active');
@@ -1121,36 +1002,6 @@ showLeaderboard();
 # ---------------------------------------------------------------------------
 # Generation
 # ---------------------------------------------------------------------------
-
-def get_week_id() -> str:
-    """Return ISO week id for current week in configured timezone, e.g. '2026-W09'."""
-    iso = _now_tz().isocalendar()
-    return f"{iso[0]}-W{iso[1]:02d}"
-
-
-def save_week_history(week_id: str, label: str, week_data: dict):
-    """Save current week data to dashboard/history/{week_id}.json."""
-    hist_dir = Path(__file__).parent / "dashboard" / "history"
-    hist_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"week_id": week_id, "label": label, "all": week_data["all"]}
-    (hist_dir / f"{week_id}.json").write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-
-
-def load_history() -> dict:
-    """Load all historical weeks from dashboard/history/*.json."""
-    hist_dir = Path(__file__).parent / "dashboard" / "history"
-    if not hist_dir.exists():
-        return {}
-    result = {}
-    for f in sorted(hist_dir.glob("20*.json")):
-        try:
-            obj = json.loads(f.read_text(encoding="utf-8"))
-            result[obj["week_id"]] = obj
-        except Exception:
-            pass
-    return result
-
 
 def save_daily_snapshot(date_str: str, label: str, week_data: dict):
     daily_dir = Path(__file__).parent / "dashboard" / "history" / "daily"
@@ -1210,6 +1061,7 @@ def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
     (newest-first). Returns (merged_ledger, anchor_missed)."""
     if not ledger:
         new_entries, anchor_missed = fresh, False
+        print("  Ledger empty — no anchor to match, treating full fetch as new.")
     else:
         anchor = [_activity_key(a) for a in ledger[:_ANCHOR_SIZE]]
         n = len(anchor)
@@ -1220,6 +1072,10 @@ def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
         )
         new_entries = fresh if match_at is None else fresh[:match_at]
         anchor_missed = match_at is None
+        if anchor_missed:
+            print(f"  Anchor NOT found: {anchor}")
+        else:
+            print(f"  Anchor found at fresh[{match_at}:{match_at + n}]: {anchor}")
 
     stamped = [{**a, "ingested_at": now_iso} for a in new_entries]
     return stamped + ledger, anchor_missed
@@ -1252,37 +1108,22 @@ def generate():
     if anchor_missed and stored_ledger:
         print("  WARNING: ledger anchor not found in fresh activities — "
               "appended full fetch, some activities may be double-counted.")
+    new_count = len(full_ledger) - len(stored_ledger)
+    print(f"  {new_count} new activities appended to ledger.")
     save_ledger(LEDGER_PATH, full_ledger)
 
-    week_id = get_week_id()
-    history = load_history()
-
     date_str = now_dt.strftime("%Y-%m-%d")
-    activities, day_activities = [], []
-    for a in full_ledger:
-        dt = datetime.strptime(a["ingested_at"], "%Y-%m-%dT%H:%M")
-        if f"{dt.isocalendar()[0]}-W{dt.isocalendar()[1]:02d}" == week_id:
-            activities.append(a)
-        if a["ingested_at"][:10] == date_str:
-            day_activities.append(a)
-
     name_map = load_name_map()
     uc_map   = load_unit_company_map()
-    label = week_label_for_id(week_id)
-    week_data = build_week_data(activities, members, label, name_map, uc_map)
-    save_week_history(week_id, label, week_data)
 
     date_label = f"{now_dt.day}.{now_dt.month}.{now_dt.year}"
-    day_data = build_week_data(day_activities, members, date_label, name_map, uc_map)
-    save_daily_snapshot(date_str, date_label, day_data)
+    # full_ledger entries are all ingested_at <= now, so this *is* the
+    # cumulative-to-date total — no per-week/per-day filtering needed.
+    today_data = build_week_data(full_ledger, members, date_label, name_map, uc_map)
+    save_daily_snapshot(date_str, date_label, today_data)
     daily_snapshots = load_daily_snapshots()
 
-    history = load_history()
-    # exclude current week from history tabs (it's shown as live)
-    history_past = {k: v for k, v in history.items() if k != week_id}
-    prev_week_id = max(history_past.keys()) if history_past else ""
-
-    data = {"week": history.get(week_id, {"all": {}})}
+    data = {"today": today_data}
 
     _, human_label = now_label()
 
@@ -1305,10 +1146,7 @@ def generate():
 
     html = TEMPLATE
     html = html.replace("__DATA__", json.dumps(data, ensure_ascii=False))
-    html = html.replace("__HISTORY_DATA__", json.dumps(history_past, ensure_ascii=False))
     html = html.replace("__DAILY_DATA__", json.dumps(daily_snapshots, ensure_ascii=False))
-    html = html.replace("__CURRENT_WEEK_ID__", week_id)
-    html = html.replace("__PREV_WEEK_ID__", prev_week_id)
     html = html.replace("__UPDATED_HUMAN__", human_label)
     html = html.replace("__WEATHER__", weather_html)
     html = html.replace("__CLUB_NAME__", club_name)
@@ -1320,9 +1158,9 @@ def generate():
     out_path = out_dir / "index.html"
     out_path.write_text(html, encoding="utf-8")
 
-    w = data["week"]["all"]
+    w = data["today"]["all"]
     print(f"Generated: {out_path}")
-    print(f"  This week: {w.get('count', 0)} activities, {w.get('athlete_count', 0)} runners")
+    print(f"  Cumulative: {w.get('count', 0)} activities, {w.get('athlete_count', 0)} runners")
 
 
 if __name__ == "__main__":
