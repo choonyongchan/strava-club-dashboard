@@ -42,6 +42,10 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
     climber_run_elev: dict = defaultdict(float)
     climber_run_km: dict   = defaultdict(float)
 
+    virtual_counts: dict = defaultdict(int)
+    ebike_counts: dict   = defaultdict(int)
+    break_time: dict     = defaultdict(float)
+
     for act in activities:
         athlete = act.get("athlete", {})
         fname = athlete.get("firstname", "?")
@@ -50,8 +54,10 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
         dist_km = act.get("distance", 0) / 1000
         elev = act.get("total_elevation_gain", 0)
         time_s = act.get("moving_time", 0)
+        elapsed = act.get("elapsed_time", 0)
         speed = (act.get("distance", 0) / time_s) if time_s > 0 else 0
-        is_ebike = act.get("type") == "EBikeRide"
+        atype = act.get("type", "")
+        is_ebike = atype == "EBikeRide"
         if name not in athlete_id and name in member_map:
             athlete_id[name] = member_map[name]
         if name_map:
@@ -86,6 +92,12 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
             if dist_km >= 5 and dist_km > 0 and (elev / dist_km) >= 8:
                 climber_run_elev[name] += elev
                 climber_run_km[name]   += dist_km
+
+        if atype == "VirtualRide":
+            virtual_counts[name] += 1
+        if atype == "EBikeRide":
+            ebike_counts[name] += 1
+        break_time[name] += max(0, elapsed - time_s)
 
     def top(d, reverse=True):
         return sorted(d.items(), key=lambda x: x[1], reverse=reverse)
@@ -197,26 +209,6 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
             return None
         name, val = rank[0]
         return {"name": name, "athlete_id": athlete_id.get(name), "value": val_fn(val)}
-
-    # Fun stats
-    virtual_counts: dict = defaultdict(int)
-    ebike_counts: dict   = defaultdict(int)
-    break_time: dict     = defaultdict(float)
-
-    for act in activities:
-        athlete = act.get("athlete", {})
-        fname = athlete.get("firstname", "?")
-        lname = athlete.get("lastname", "")
-        name  = f"{fname} {lname}".strip()
-        atype   = act.get("type", "")
-        elapsed = act.get("elapsed_time", 0)
-        moving  = act.get("moving_time", 0)
-
-        if atype == "VirtualRide":
-            virtual_counts[name] += 1
-        if atype == "EBikeRide":
-            ebike_counts[name] += 1
-        break_time[name] += max(0, elapsed - moving)
 
     # Climber — avg m+/km from runs with >= 8 m+/km, at least 30 km total
     elev_per_km: dict = {}

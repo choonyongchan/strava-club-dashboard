@@ -123,12 +123,10 @@ def now_label() -> tuple:
 
 
 def build_week_data(acts: list, members: list, label: str, name_map: dict = None, uc_map: dict = None) -> dict:
-    def build(a):
-        s = report_generator.compute_stats(a, members=members, name_map=name_map, uc_map=uc_map)
-        s["label"] = label
-        s["count"] = len(a)
-        return make_json_safe(s)
-    return {"all": build(acts)}
+    s = report_generator.compute_stats(acts, members=members, name_map=name_map, uc_map=uc_map)
+    s["label"] = label
+    s["count"] = len(acts)
+    return make_json_safe(s)
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +659,7 @@ function fmtTime(s) {
 
 function d() {
   if (currentDailyDate) return DAILY[currentDailyDate]['all'];
-  return DATA['today']['all'];
+  return DATA['today'];
 }
 
 function toggleHistoryPicker(e) {
@@ -907,7 +905,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFilterM
 function renderLeaderboard(data) {
   const all = data.leaderboard || [];
   const activeCount = all.filter(r => r.acts > 0).length;
-  document.getElementById('leaderboard-count').textContent = `(${activeCount} active / ${all.length} total)`;
+  document.getElementById('leaderboard-count').textContent = `(${activeCount} active / ${data.athlete_count} total)`;
   // self-heal: reset filter if its value no longer exists in current dataset
   const units     = new Set(all.map(r => r.unit).filter(Boolean));
   const companies = new Set(all.map(r => r.company).filter(Boolean));
@@ -946,7 +944,7 @@ function renderGroupRankings(data) {
     const map = {};
     for (const r of (data.leaderboard || [])) {
       const k = r[key]; if (!k) continue;
-      if (!map[k]) map[k] = { name: k, km: 0, active: 0, total: 0, unit: r.unit };
+      if (!map[k]) map[k] = { name: k, km: 0, active: 0, total: 0 };
       map[k].km += r.km;
       map[k].total++;
       if (r.acts > 0) map[k].active++;
@@ -1010,7 +1008,7 @@ showLeaderboard();
 def save_daily_snapshot(date_str: str, label: str, week_data: dict):
     daily_dir = Path(__file__).parent / "dashboard" / "history" / "daily"
     daily_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"date": date_str, "label": label, "all": week_data["all"]}
+    payload = {"date": date_str, "label": label, "all": week_data}
     (daily_dir / f"{date_str}.json").write_text(
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
@@ -1048,16 +1046,11 @@ LEDGER_PATH = Path(__file__).parent / "dashboard" / "history" / "ledger.json"
 # found by anchoring on the ledger's 3 most-recent entries inside the fresh
 # fetch. Anchor missing (>197 new activities in an hour, or an anchored
 # activity edited/deleted) -> append everything, accept occasional double-count.
-_ACTIVITY_KEY_FIELDS = (
-    "distance", "moving_time",
-)
-_ANCHOR_SIZE = 3
-
 
 def _activity_key(act: dict) -> tuple:
     athlete = act.get("athlete") or {}
     name = (athlete.get("firstname", ""), athlete.get("lastname", ""))
-    return (name,) + tuple(act.get(f) for f in _ACTIVITY_KEY_FIELDS)
+    return (name, act.get("distance"), act.get("moving_time"))
 
 
 def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
@@ -1067,7 +1060,7 @@ def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
         new_entries, anchor_missed = fresh, False
         print("  Ledger empty — no anchor to match, treating full fetch as new.")
     else:
-        anchor = [_activity_key(a) for a in ledger[:_ANCHOR_SIZE]]
+        anchor = [_activity_key(a) for a in ledger[:3]]
         n = len(anchor)
         match_at = next(
             (i for i in range(len(fresh) - n + 1)
@@ -1162,7 +1155,7 @@ def generate():
     out_path = out_dir / "index.html"
     out_path.write_text(html, encoding="utf-8")
 
-    w = data["today"]["all"]
+    w = data["today"]
     print(f"Generated: {out_path}")
     print(f"  Cumulative: {w.get('count', 0)} activities, {w.get('athlete_count', 0)} runners")
 
