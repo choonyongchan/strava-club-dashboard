@@ -1143,17 +1143,85 @@ def make_json_safe(stats: dict) -> dict:
     return fix(stats)
 
 
+LEDGER_PATH = Path(__file__).parent / "dashboard" / "history" / "ledger.json"
+
+# ponytail: no activity id/timestamp in Strava's club feed, so new entries are
+# found by anchoring on the ledger's 3 most-recent entries inside the fresh
+# fetch. Anchor missing (>197 new activities in an hour, or an anchored
+# activity edited/deleted) -> append everything, accept occasional double-count.
+_ACTIVITY_KEY_FIELDS = (
+    "type", "distance", "moving_time", "elapsed_time",
+    "total_elevation_gain", "device_name",
+)
+_ANCHOR_SIZE = 3
+
+
+def _activity_key(act: dict) -> tuple:
+    athlete = act.get("athlete") or {}
+    name = (athlete.get("firstname", ""), athlete.get("lastname", ""))
+    return (name,) + tuple(act.get(f) for f in _ACTIVITY_KEY_FIELDS)
+
+
+def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
+    """Merge freshly fetched activities (newest-first) into the ledger
+    (newest-first). Returns (merged_ledger, anchor_missed)."""
+    if not ledger:
+        new_entries, anchor_missed = fresh, False
+    else:
+        anchor = [_activity_key(a) for a in ledger[:_ANCHOR_SIZE]]
+        n = len(anchor)
+        match_at = next(
+            (i for i in range(len(fresh) - n + 1)
+             if [_activity_key(a) for a in fresh[i:i + n]] == anchor),
+            None,
+        )
+        new_entries = fresh if match_at is None else fresh[:match_at]
+        anchor_missed = match_at is None
+
+    stamped = [{**a, "ingested_at": now_iso} for a in new_entries]
+    return stamped + ledger, anchor_missed
+
+
+def load_ledger(path: Path) -> list:
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_ledger(path: Path, ledger: list) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(ledger, ensure_ascii=False), encoding="utf-8")
+
+
 def generate():
     print("Fetching data from Strava...")
 
     token   = strava_client.get_access_token()
     members = strava_client.fetch_club_members(token)
 
+    print("  Fetching latest club activities...")
+    fresh = strava_client.fetch_club_activities(token)
+    now_dt = _now_tz()
+    now_iso = now_dt.strftime("%Y-%m-%dT%H:%M")
+
+    stored_ledger = load_ledger(LEDGER_PATH)
+    full_ledger, anchor_missed = merge_ledger(stored_ledger, fresh, now_iso)
+    if anchor_missed and stored_ledger:
+        print("  WARNING: ledger anchor not found in fresh activities — "
+              "appended full fetch, some activities may be double-counted.")
+    save_ledger(LEDGER_PATH, full_ledger)
+
     week_id = get_week_id()
     history = load_history()
 
-    print("  Fetching all club activities...")
-    activities = strava_client.fetch_club_activities(token)
+    date_str = now_dt.strftime("%Y-%m-%d")
+    activities, day_activities = [], []
+    for a in full_ledger:
+        dt = datetime.strptime(a["ingested_at"], "%Y-%m-%dT%H:%M")
+        if f"{dt.isocalendar()[0]}-W{dt.isocalendar()[1]:02d}" == week_id:
+            activities.append(a)
+        if a["ingested_at"][:10] == date_str:
+            day_activities.append(a)
 
     name_map = load_name_map()
     uc_map   = load_unit_company_map()
@@ -1161,10 +1229,9 @@ def generate():
     week_data = build_week_data(activities, members, label, name_map, uc_map)
     save_week_history(week_id, label, week_data)
 
-    today = datetime.now(_TZ8)
-    date_str = today.strftime("%Y-%m-%d")
-    date_label = f"{today.day}.{today.month}.{today.year}"
-    save_daily_snapshot(date_str, date_label, week_data)
+    date_label = f"{now_dt.day}.{now_dt.month}.{now_dt.year}"
+    day_data = build_week_data(day_activities, members, date_label, name_map, uc_map)
+    save_daily_snapshot(date_str, date_label, day_data)
     daily_snapshots = load_daily_snapshots()
 
     history = load_history()

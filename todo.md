@@ -1,3 +1,4 @@
-1. 
-2. Enable ingestion of excel sheet (with name and unit mapping)
-3. Filter for All, 40SAR, 41SAR and 8SAB (i.e. set of unique units)
+1. Verify new members
+2. Update Excel Sheet
+
+3. Can I adapt old data into our new data?
