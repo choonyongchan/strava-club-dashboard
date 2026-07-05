@@ -289,6 +289,27 @@ nav {
 .hist-grid {
   display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px;
 }
+.hist-cal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.hist-cal-month { font-size: .8rem; font-weight: 700; color: #333; }
+.hist-cal-nav {
+  background: none; border: none; cursor: pointer;
+  font-size: 1rem; font-weight: 700; color: #777; padding: 2px 10px;
+  border-radius: 6px; line-height: 1.4;
+}
+.hist-cal-nav:hover:not(:disabled) { background: #f5f5f5; color: #333; }
+.hist-cal-nav:disabled { color: #ddd; cursor: default; }
+.hist-cal-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+  margin-bottom: 4px;
+}
+.hist-cal-weekdays div {
+  text-align: center; font-size: .62rem; font-weight: 700;
+  color: #bbb; text-transform: uppercase;
+}
+.hist-cal-grid { grid-template-columns: repeat(7, 1fr); margin-bottom: 14px; }
 .hist-cell {
   aspect-ratio: 1; border-radius: 6px; border: none;
   font-size: .7rem; font-weight: 700; cursor: default;
@@ -652,6 +673,7 @@ let currentSort        = { key: 'km', dir: -1 };
 let currentHistoryWeek = null;
 let cumulativeMode     = false;
 let currentDailyDate   = null;
+let calendarMonth      = null; // 'YYYY-MM', set on first render
 let filterUnit         = '';
 let filterCompany      = '';
 
@@ -750,6 +772,48 @@ function sortedLeaderboard(rows) {
   });
 }
 
+function changeCalendarMonth(delta) {
+  const [y, m] = calendarMonth.split('-').map(Number);
+  const nd = new Date(y, m - 1 + delta, 1);
+  calendarMonth = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`;
+  render();
+}
+
+function renderDayCalendar() {
+  const [year, month] = calendarMonth.split('-').map(Number);
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('en', { month: 'long', year: 'numeric' });
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dailyKeys = Object.keys(DAILY);
+  const minMonth = dailyKeys.length ? dailyKeys.sort()[0].slice(0, 7) : calendarMonth;
+  const maxMonth = dailyKeys.length ? dailyKeys.sort().at(-1).slice(0, 7) : calendarMonth;
+
+  let html = `<div class="hist-year-label">Days</div>
+    <div class="hist-cal-header">
+      <button class="hist-cal-nav" onclick="changeCalendarMonth(-1)" ${calendarMonth <= minMonth ? 'disabled' : ''}>‹</button>
+      <div class="hist-cal-month">${monthLabel}</div>
+      <button class="hist-cal-nav" onclick="changeCalendarMonth(1)" ${calendarMonth >= maxMonth ? 'disabled' : ''}>›</button>
+    </div>
+    <div class="hist-cal-weekdays">${['S','M','T','W','T','F','S'].map(d => `<div>${d}</div>`).join('')}</div>
+    <div class="hist-grid hist-cal-grid">`;
+
+  for (let i = 0; i < firstWeekday; i++) html += `<div class="hist-cell"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${calendarMonth}-${String(day).padStart(2, '0')}`;
+    const hasData = !!DAILY[date];
+    const isActive = date === currentDailyDate;
+    let cls = 'hist-cell';
+    if (isActive) cls += ' active';
+    else if (hasData) cls += ' has-data';
+    else cls += ' empty';
+    const tip = hasData ? `title="${DAILY[date].label}"` : '';
+    const click = hasData ? `onclick="showDailySnapshot('${date}')"` : '';
+    html += `<div class="${cls}" ${tip} ${click}>${day}</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
 function render() {
   const data = d();
   if (currentDailyDate) {
@@ -845,26 +909,20 @@ function render() {
     document.getElementById('device-section').style.display  = 'none';
   }
 
-  // History picker — populate day + week grids
+  // History picker — populate day calendar + week grids
   const histKeys = new Set(Object.keys(HISTORY));
-  const dailyKeys = Object.keys(DAILY).sort().reverse();
+  const dailyKeys = Object.keys(DAILY);
   const currentWid = '__CURRENT_WEEK_ID__';
   document.getElementById('history-wrap').style.display = (histKeys.size || dailyKeys.length) ? '' : 'none';
   if (PREV_WEEK_ID && HISTORY[PREV_WEEK_ID]) {
     document.getElementById('btn-7days').style.display = '';
   }
+  if (!calendarMonth) {
+    calendarMonth = (dailyKeys.length ? dailyKeys.sort().at(-1) : new Date().toISOString()).slice(0, 7);
+  }
   const years = new Set([parseInt(currentWid.split('-W')[0])]);
   histKeys.forEach(k => years.add(parseInt(k.split('-W')[0])));
-  let pickerHtml = '';
-  if (dailyKeys.length) {
-    pickerHtml += `<div class="hist-year-label">Days</div><div class="hist-grid">`;
-    dailyKeys.forEach(date => {
-      const isActive = date === currentDailyDate;
-      const dayNum = parseInt(date.slice(8, 10), 10);
-      pickerHtml += `<div class="hist-cell ${isActive ? 'active' : 'has-data'}" title="${DAILY[date].label}" onclick="showDailySnapshot('${date}')">${dayNum}</div>`;
-    });
-    pickerHtml += '</div>';
-  }
+  let pickerHtml = renderDayCalendar();
   [...years].sort().forEach(year => {
     pickerHtml += `<div class="hist-year-label">${year}</div><div class="hist-grid">`;
     for (let w = 1; w <= 52; w++) {
@@ -1136,8 +1194,7 @@ LEDGER_PATH = Path(__file__).parent / "dashboard" / "history" / "ledger.json"
 # fetch. Anchor missing (>197 new activities in an hour, or an anchored
 # activity edited/deleted) -> append everything, accept occasional double-count.
 _ACTIVITY_KEY_FIELDS = (
-    "type", "distance", "moving_time", "elapsed_time",
-    "total_elevation_gain", "device_name",
+    "distance", "moving_time",
 )
 _ANCHOR_SIZE = 3
 
