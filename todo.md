@@ -1,4 +1,2 @@
-1. Verify new members
-2. Update Excel Sheet
-
-3. Can I adapt old data into our new data?
+1. Create cumulative leaderboard for each day & Display them on index.html
+2. Change composite key to name, distance and duration
