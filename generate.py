@@ -537,14 +537,12 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
   <div class="controls-row">
     <div class="toggle">
       <button class="tab active" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
-      <button class="tab" onclick="showMode('week')" id="btn-week">This Week</button>
       <button class="tab" onclick="showPrevWeek()" id="btn-7days" style="display:none">Last Week</button>
-      <div id="daily-tabs" style="display:inline-flex;gap:4px"></div>
       <div class="history-wrap" id="history-wrap" style="display:none">
         <button class="tab" onclick="toggleHistoryPicker(event)" id="btn-history">📅 History</button>
         <div class="history-picker" id="history-picker">
           <div class="history-picker-header">
-            <div class="history-picker-title">Pick a week</div>
+            <div class="history-picker-title">Pick a date</div>
             <button class="history-picker-close" onclick="closeHistoryPicker()" title="Close">✕</button>
           </div>
           <div id="history-picker-list"></div>
@@ -847,16 +845,26 @@ function render() {
     document.getElementById('device-section').style.display  = 'none';
   }
 
-  // History picker — populate week grid
+  // History picker — populate day + week grids
   const histKeys = new Set(Object.keys(HISTORY));
+  const dailyKeys = Object.keys(DAILY).sort().reverse();
   const currentWid = '__CURRENT_WEEK_ID__';
-  document.getElementById('history-wrap').style.display = histKeys.size ? '' : 'none';
+  document.getElementById('history-wrap').style.display = (histKeys.size || dailyKeys.length) ? '' : 'none';
   if (PREV_WEEK_ID && HISTORY[PREV_WEEK_ID]) {
     document.getElementById('btn-7days').style.display = '';
   }
   const years = new Set([parseInt(currentWid.split('-W')[0])]);
   histKeys.forEach(k => years.add(parseInt(k.split('-W')[0])));
   let pickerHtml = '';
+  if (dailyKeys.length) {
+    pickerHtml += `<div class="hist-year-label">Days</div><div class="hist-grid">`;
+    dailyKeys.forEach(date => {
+      const isActive = date === currentDailyDate;
+      const dayNum = parseInt(date.slice(8, 10), 10);
+      pickerHtml += `<div class="hist-cell ${isActive ? 'active' : 'has-data'}" title="${DAILY[date].label}" onclick="showDailySnapshot('${date}')">${dayNum}</div>`;
+    });
+    pickerHtml += '</div>';
+  }
   [...years].sort().forEach(year => {
     pickerHtml += `<div class="hist-year-label">${year}</div><div class="hist-grid">`;
     for (let w = 1; w <= 52; w++) {
@@ -870,19 +878,12 @@ function render() {
       else if (isCurrent) cls += ' current';
       else cls += ' empty';
       const tip = hasData ? `title="${HISTORY[wid].label}"` : (isCurrent ? 'title="Current week"' : '');
-      const click = hasData ? `onclick="showHistoryWeek('${wid}')"` : (isCurrent ? `onclick="showMode('week');closeHistoryPicker()"` : '');
+      const click = hasData ? `onclick="showHistoryWeek('${wid}')"` : '';
       pickerHtml += `<div class="${cls}" ${tip} ${click}>${w}</div>`;
     }
     pickerHtml += '</div>';
   });
   document.getElementById('history-picker-list').innerHTML = pickerHtml;
-
-  // Daily snapshot tabs (descending order, right of Leaderboard button)
-  const dailyKeys = Object.keys(DAILY).sort().reverse();
-  document.getElementById('daily-tabs').innerHTML = dailyKeys.map(date => {
-    const isActive = date === currentDailyDate;
-    return `<button class="tab${isActive ? ' active' : ''}" onclick="showDailySnapshot('${date}')">${DAILY[date].label}</button>`;
-  }).join('');
 
   renderLeaderboard(data);
   renderGroupRankings(data);
@@ -1008,23 +1009,11 @@ function renderGroupRankings(data) {
   document.getElementById('company-rankings').innerHTML = tableHtml(groupBy('company'), 'Company');
 }
 
-function showMode(mode) {
-  cumulativeMode = false;
-  currentHistoryWeek = null;
-  currentDailyDate = null;
-  document.getElementById('btn-week').classList.toggle('active', mode==='week');
-  document.getElementById('btn-7days').classList.remove('active');
-  document.getElementById('btn-history').classList.remove('active');
-  document.getElementById('btn-leaderboard').classList.remove('active');
-  render();
-}
-
 function showPrevWeek() {
   if (!PREV_WEEK_ID) return;
   cumulativeMode = false;
   currentHistoryWeek = PREV_WEEK_ID;
   currentDailyDate = null;
-  document.getElementById('btn-week').classList.remove('active');
   document.getElementById('btn-7days').classList.add('active');
   document.getElementById('btn-history').classList.remove('active');
   document.getElementById('btn-leaderboard').classList.remove('active');
@@ -1037,7 +1026,6 @@ function showHistoryWeek(weekId) {
   currentDailyDate = null;
   closeHistoryPicker();
   const isPrevWeek = weekId === PREV_WEEK_ID;
-  document.getElementById('btn-week').classList.remove('active');
   document.getElementById('btn-7days').classList.toggle('active', isPrevWeek);
   document.getElementById('btn-history').classList.toggle('active', !isPrevWeek);
   document.getElementById('btn-leaderboard').classList.remove('active');
@@ -1048,7 +1036,6 @@ function showLeaderboard() {
   cumulativeMode = true;
   currentHistoryWeek = null;
   currentDailyDate = null;
-  document.getElementById('btn-week').classList.remove('active');
   document.getElementById('btn-7days').classList.remove('active');
   document.getElementById('btn-history').classList.remove('active');
   document.getElementById('btn-leaderboard').classList.add('active');
@@ -1059,7 +1046,7 @@ function showDailySnapshot(date) {
   currentDailyDate = date;
   cumulativeMode = false;
   currentHistoryWeek = null;
-  document.getElementById('btn-week').classList.remove('active');
+  closeHistoryPicker();
   document.getElementById('btn-7days').classList.remove('active');
   document.getElementById('btn-history').classList.remove('active');
   document.getElementById('btn-leaderboard').classList.remove('active');
@@ -1067,7 +1054,6 @@ function showDailySnapshot(date) {
 }
 
 
-document.getElementById('btn-week').textContent = 'Week of ' + sundayOfWeek('__CURRENT_WEEK_ID__');
 showLeaderboard();
 </script>
 </body>

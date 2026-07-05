@@ -2,8 +2,8 @@ name: Update Strava Dashboard
 
 on:
   schedule:
-    # Every hour (Strava rate limit: 1000 req/day, script uses ~4)
-    - cron: '0 * * * *'
+    # Once a day at midnight UTC
+    - cron: '0 0 * * *'
   workflow_dispatch:   # Manual trigger via GitHub UI
 
 jobs:
