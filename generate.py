@@ -587,7 +587,7 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
   </div>
 
   <div id="leaderboard-section">
-    <div class="section-title">Runner Leaderboard</div>
+    <div class="section-title">Runner Leaderboard <span id="leaderboard-count" style="text-transform:none;letter-spacing:normal;color:#bbb;font-weight:400"></span></div>
     <div class="table-wrap">
     <table>
       <thead>
@@ -757,6 +757,7 @@ function render() {
     { v: Math.round(data.total_km).toLocaleString('en'), l: 'total km' },
     { v: Math.round(data.total_elev).toLocaleString('en'), l: 'elevation (m)' },
     { v: data.run_count, l: 'activities' },
+    { v: (data.leaderboard || []).filter(r => r.acts > 0).length, l: 'active runners' },
     { v: data.athlete_count, l: 'runners' },
   ].map(t => `<div class="total-card fade">
     <div class="val">${t.v}</div><div class="lbl">${t.l}</div>
@@ -905,6 +906,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFilterM
 
 function renderLeaderboard(data) {
   const all = data.leaderboard || [];
+  const activeCount = all.filter(r => r.acts > 0).length;
+  document.getElementById('leaderboard-count').textContent = `(${activeCount} active / ${all.length} total)`;
   // self-heal: reset filter if its value no longer exists in current dataset
   const units     = new Set(all.map(r => r.unit).filter(Boolean));
   const companies = new Set(all.map(r => r.company).filter(Boolean));
@@ -943,24 +946,25 @@ function renderGroupRankings(data) {
     const map = {};
     for (const r of (data.leaderboard || [])) {
       const k = r[key]; if (!k) continue;
-      if (!map[k]) map[k] = { name: k, km: 0, runners: 0, unit: r.unit };
+      if (!map[k]) map[k] = { name: k, km: 0, active: 0, total: 0, unit: r.unit };
       map[k].km += r.km;
-      if (r.acts > 0) map[k].runners++;
+      map[k].total++;
+      if (r.acts > 0) map[k].active++;
     }
     return Object.values(map).sort((a, b) => b.km - a.km);
   }
-  function tableHtml(groups, label, showUnit) {
+  function tableHtml(groups, label) {
     if (!groups.length) return `<p style="color:#ccc;padding:16px;text-align:center;font-size:.82rem">No ${label} data</p>`;
     return `<table><thead><tr><th>#</th><th style="text-align:left">${label}</th><th>km</th><th>Runners</th></tr></thead><tbody>` +
       groups.map((g, i) => `<tr>
         <td>${MEDALS[i]||'<span style="color:#ccc;font-size:.75rem">'+(i+1)+'</span>'}</td>
-        <td style="text-align:left;font-weight:700">${esc(g.name)}${showUnit && g.unit ? `<sub>${esc(g.unit)}</sub>` : ''}</td>
+        <td style="text-align:left;font-weight:700">${esc(g.name)}</td>
         <td class="km-cell">${Math.round(g.km * 10) / 10}</td>
-        <td style="text-align:center">${g.runners}</td>
+        <td style="text-align:center">${g.active}/${g.total}</td>
       </tr>`).join('') + '</tbody></table>';
   }
   document.getElementById('unit-rankings').innerHTML    = tableHtml(groupBy('unit'),    'Unit');
-  document.getElementById('company-rankings').innerHTML = tableHtml(groupBy('company'), 'Company', true);
+  document.getElementById('company-rankings').innerHTML = tableHtml(groupBy('company'), 'Company');
 }
 
 function showPrevWeek() {
