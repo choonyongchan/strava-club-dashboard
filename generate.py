@@ -524,7 +524,7 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
   <div class="header">
     <div class="header-top">
       <div>
-        <h1>🏃 Weekly Report – __CLUB_NAME__</h1>
+        <h1>🏃__CLUB_NAME__</h1>
         <div class="sub">
           <span class="dot"></span>
           <span id="period-label"></span>
