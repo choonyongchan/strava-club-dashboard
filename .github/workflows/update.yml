@@ -1,10 +1,16 @@
-name: Update Strava Dashboard
+name: Update and Deploy Strava Dashboard
 
 on:
   schedule:
     # Every hour
     - cron: '0 * * * *'
   workflow_dispatch:   # Manual trigger via GitHub UI
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   generate:
@@ -19,7 +25,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.14'
           cache: 'pip'
 
       - name: Install dependencies
@@ -47,3 +53,29 @@ jobs:
           for i in 1 2 3; do
             git push && break || { echo "Push failed (attempt $i/3), waiting 15s..."; sleep 15; git pull --rebase; }
           done
+
+  deploy:
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dashboard'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
