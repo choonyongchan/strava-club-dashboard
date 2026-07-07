@@ -203,6 +203,7 @@ def compute_stats(activities: list, members: list = None, name_map: dict = None,
                     "unit":    uc_map.get(name, {}).get("unit", "")    if uc_map else "",
                     "company": uc_map.get(name, {}).get("company", "") if uc_map else "",
                 })
+                active_names.add(name)
 
     def award(rank, val_fn):
         if not rank:

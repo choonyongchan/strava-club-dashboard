@@ -50,8 +50,24 @@ def test_anchor_missing_falls_back_to_full_append():
     assert [m["athlete"]["firstname"] for m in merged[:2]] == ["New1", "New2"]
 
 
+def test_anchor_missing_does_not_duplicate_known_activities():
+    # e.g. an anchored activity was edited/deleted on Strava, breaking the
+    # anchor match, even though most of the fresh fetch overlaps the ledger.
+    ledger = [
+        {**act("C"), "ingested_at": "T0"},
+        {**act("B"), "ingested_at": "T0"},
+        {**act("A"), "ingested_at": "T0"},
+    ]
+    fresh = [act("New1"), act("New2"), act("C"), act("B")]  # A deleted/edited on Strava
+    merged, missed = merge_ledger(ledger, fresh, "T1")
+    assert missed
+    assert len(merged) == 5  # New1, New2 + C, B, A once each — not duplicated
+    assert [m["athlete"]["firstname"] for m in merged] == ["New1", "New2", "C", "B", "A"]
+
+
 if __name__ == "__main__":
     test_empty_ledger_bootstraps_everything()
     test_anchor_found_appends_only_new()
     test_anchor_missing_falls_back_to_full_append()
+    test_anchor_missing_does_not_duplicate_known_activities()
     print("All ledger tests passed.")

@@ -1050,12 +1050,28 @@ LEDGER_PATH = Path(__file__).parent / "dashboard" / "history" / "ledger.json"
 def _activity_key(act: dict) -> tuple:
     athlete = act.get("athlete") or {}
     name = (athlete.get("firstname", ""), athlete.get("lastname", ""))
-    return (name, act.get("distance"), act.get("moving_time"))
+    return (
+        name,
+        act.get("name"),
+        act.get("distance"),
+        act.get("moving_time"),
+        act.get("elapsed_time"),
+        act.get("total_elevation_gain"),
+        act.get("device_name"),
+    )
 
 
 def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
     """Merge freshly fetched activities (newest-first) into the ledger
-    (newest-first). Returns (merged_ledger, anchor_missed)."""
+    (newest-first). Returns (merged_ledger, anchor_missed).
+
+    The anchor match is only a fast path for finding new activities — Strava's
+    club feed has no activity id/timestamp, so the anchor can legitimately miss
+    (>197 new activities in an hour, or an anchored activity edited/deleted).
+    Content-key dedup below is the actual correctness guarantee: it runs
+    unconditionally, so a missed or stale anchor can degrade to "append
+    everything" but can never reintroduce an activity already in the ledger.
+    """
     if not ledger:
         new_entries, anchor_missed = fresh, False
         print("  Ledger empty — no anchor to match, treating full fetch as new.")
@@ -1073,6 +1089,9 @@ def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
             print(f"  Anchor NOT found: {anchor}")
         else:
             print(f"  Anchor found at fresh[{match_at}:{match_at + n}]: {anchor}")
+
+    existing_keys = {_activity_key(a) for a in ledger}
+    new_entries = [a for a in new_entries if _activity_key(a) not in existing_keys]
 
     stamped = [{**a, "ingested_at": now_iso} for a in new_entries]
     return stamped + ledger, anchor_missed
