@@ -29,6 +29,24 @@ def _all_truncations(strava_name: str):
         prefix = " ".join(parts[:i])
         yield f"{prefix} {parts[i][0]}."
 
+UNIT_GROUPS = {
+    "nsf":   ["40SAR"],
+    "nsmen": ["41SAR", "8SAB"],
+}
+
+def _resolve_full_name(first, last, name_map):
+    name = f"{first} {last}".strip()
+    if name_map:
+        name = name_map.get(name.lower().strip(), name)
+    return name
+
+def filter_by_units(acts, members, name_map, uc_map, units):
+    def in_group(first, last):
+        return uc_map.get(_resolve_full_name(first, last, name_map), {}).get("unit") in units
+    acts_f    = [a for a in acts if in_group(a.get("athlete", {}).get("firstname", "?"), a.get("athlete", {}).get("lastname", ""))]
+    members_f = [m for m in members if in_group(m.get("firstname", ""), m.get("lastname", ""))]
+    return acts_f, members_f
+
 def load_unit_company_map(path=None) -> dict:
     """Returns {FULL_NAME: {unit, company}} from nominal_roll.csv"""
     if path is None:
@@ -206,6 +224,21 @@ nav {
   white-space: nowrap; flex-shrink: 0;
   display: flex; align-items: center; gap: 6px;
 }
+
+/* GROUP TABS */
+.group-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.group-tab {
+  padding: 7px 14px; border-radius: 8px;
+  font-size: .82rem; font-weight: 600;
+  border: 1.5px solid #ddd; background: white;
+  color: #666; cursor: pointer; transition: all .15s;
+  white-space: nowrap;
+}
+.group-tab.active { background: #FC4C02; color: white; border-color: #FC4C02; }
+.group-tab:not(.active):hover { border-color: #bbb; color: #333; }
+.breadcrumb { font-size: .78rem; color: #999; margin-bottom: 10px; }
+.breadcrumb .crumb-group { font-weight: 700; color: #FC4C02; }
+.breadcrumb .crumb-sub { font-weight: 600; color: #666; }
 
 /* CONTROLS ROW */
 .controls-row {
@@ -534,6 +567,13 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
     </div>
   </div>
 
+  <div class="group-tabs">
+    <button class="group-tab active" onclick="setGroup('all', this)">All</button>
+    <button class="group-tab" onclick="setGroup('nsf', this)">NSF (test)</button>
+    <button class="group-tab" onclick="setGroup('nsmen', this)">NSMen (test)</button>
+  </div>
+  <div class="breadcrumb" id="breadcrumb"></div>
+
   <div class="controls-row">
     <div class="toggle">
       <button class="tab active" onclick="showLeaderboard()" id="btn-leaderboard">🏆 Leaderboard</button>
@@ -651,15 +691,41 @@ let currentDailyDate   = null;
 let calendarMonth      = null; // 'YYYY-MM', set on first render
 let filterUnit         = '';
 let filterCompany      = '';
+let currentGroup       = 'all';
+let currentSub         = 'leaderboard';
+
+const GROUP_LABELS = { all: 'All', nsf: 'NSF (test)', nsmen: 'NSMen (test)' };
+const SUB_LABELS    = { leaderboard: 'Leaderboard', '7days': 'Last Week', history: 'History' };
 
 function fmtTime(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return `${h}h ${m < 10 ? '0' : ''}${m}m`;
 }
 
+function currentBucket() {
+  return currentDailyDate ? DAILY[currentDailyDate] : DATA['today'];
+}
+
 function d() {
-  if (currentDailyDate) return DAILY[currentDailyDate]['all'];
-  return DATA['today'];
+  const bucket = currentBucket();
+  return bucket[currentGroup] || bucket['all'];
+}
+
+function setGroup(g, el) {
+  currentGroup = g;
+  document.querySelectorAll('.group-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  render();
+  updateBreadcrumb(currentSub);
+}
+
+function updateBreadcrumb(sub) {
+  currentSub = sub;
+  const bucket = currentBucket();
+  const available = !!bucket[currentGroup];
+  const note = (currentGroup !== 'all' && !available) ? ' <span style="color:#bbb">(group breakdown unavailable for this date — showing All)</span>' : '';
+  document.getElementById('breadcrumb').innerHTML =
+    `<span class="crumb-group">${GROUP_LABELS[currentGroup]}</span> › <span class="crumb-sub">${SUB_LABELS[sub]}</span>${note}`;
 }
 
 function toggleHistoryPicker(e) {
@@ -975,6 +1041,7 @@ function showPrevWeek() {
   if (!key) return;
   showDailySnapshot(key);
   document.getElementById('btn-7days').classList.add('active');
+  updateBreadcrumb('7days');
 }
 
 function showLeaderboard() {
@@ -983,6 +1050,7 @@ function showLeaderboard() {
   document.getElementById('btn-history').classList.remove('active');
   document.getElementById('btn-leaderboard').classList.add('active');
   render();
+  updateBreadcrumb('leaderboard');
 }
 
 function showDailySnapshot(date) {
@@ -992,6 +1060,7 @@ function showDailySnapshot(date) {
   document.getElementById('btn-history').classList.remove('active');
   document.getElementById('btn-leaderboard').classList.remove('active');
   render();
+  updateBreadcrumb('history');
 }
 
 
@@ -1005,10 +1074,10 @@ showLeaderboard();
 # Generation
 # ---------------------------------------------------------------------------
 
-def save_daily_snapshot(date_str: str, label: str, week_data: dict):
+def save_daily_snapshot(date_str: str, label: str, group_data: dict):
     daily_dir = Path(__file__).parent / "dashboard" / "history" / "daily"
     daily_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"date": date_str, "label": label, "all": week_data}
+    payload = {"date": date_str, "label": label, **group_data}
     (daily_dir / f"{date_str}.json").write_text(
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
@@ -1135,11 +1204,15 @@ def generate():
     date_label = f"{now_dt.day}.{now_dt.month}.{now_dt.year}"
     # full_ledger entries are all ingested_at <= now, so this *is* the
     # cumulative-to-date total — no per-week/per-day filtering needed.
-    today_data = build_week_data(full_ledger, members, date_label, name_map, uc_map)
-    save_daily_snapshot(date_str, date_label, today_data)
+    group_data = {"all": build_week_data(full_ledger, members, date_label, name_map, uc_map)}
+    for group, units in UNIT_GROUPS.items():
+        g_acts, g_members = filter_by_units(full_ledger, members, name_map, uc_map, units)
+        group_data[group] = build_week_data(g_acts, g_members, date_label, name_map, uc_map)
+
+    save_daily_snapshot(date_str, date_label, group_data)
     daily_snapshots = load_daily_snapshots()
 
-    data = {"today": today_data}
+    data = {"today": group_data}
 
     _, human_label = now_label()
 
