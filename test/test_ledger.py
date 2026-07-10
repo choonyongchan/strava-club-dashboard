@@ -1,4 +1,8 @@
-"""Self-check for generate.merge_ledger — run with: python3 test_ledger.py"""
+"""Self-check for generate.merge_ledger — run with: python3 test/test_ledger.py"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from generate import merge_ledger, dedup_consecutive
 
 

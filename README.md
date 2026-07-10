@@ -47,7 +47,7 @@ cd strava-club-dashboard
 pip install -r requirements.txt
 
 # Run the setup wizard
-python3 setup_strava.py
+python3 src/setup_strava.py
 ```
 
 The wizard will:
@@ -88,10 +88,10 @@ TIMEZONE=Europe/Bratislava
 
 Generate and preview:
 ```bash
-python3 generate.py
+python3 src/generate.py
 ```
 
-Open `dashboard/index.html` in your browser to verify it works.
+Open `index.html` in your browser to verify it works.
 
 > **Note:** The `.env` file is for local testing only. For automatic updates via GitHub Actions, you need to set up GitHub Secrets (see next section).
 
@@ -121,9 +121,8 @@ In your forked repo, go to **Settings → Secrets and variables → Actions → 
 ### Enable GitHub Pages
 
 1. Go to **Settings → Pages**
-2. Source: **Deploy from a branch**
-3. Branch: `main`, folder: `/dashboard`
-4. Save
+2. Source: **GitHub Actions** (the workflow deploys `index.html` via the Pages artifact, not a branch folder)
+3. Save
 
 Your dashboard will be live at `https://yourusername.github.io/strava-club-dashboard/`
 
@@ -145,9 +144,9 @@ The workflow runs automatically every hour after this.
 
 The dashboard is in English by default. To translate it to your language, you can simply ask an AI assistant:
 
-> "Translate all UI text in `generate.py` to Czech/Slovak/German/Spanish/..."
+> "Translate all UI text in `src/generate.py` to Czech/Slovak/German/Spanish/..."
 
-All translatable strings are in one place inside the `TEMPLATE` variable in `generate.py` — the JavaScript constants `AWARDS`, `FUN`, `EMPTY_MSGS`, button labels, and section titles.
+All translatable strings are in one place inside the `TEMPLATE` variable in `src/generate.py` — the JavaScript constants `AWARDS`, `FUN`, `EMPTY_MSGS`, button labels, and section titles.
 
 ### Colors
 
@@ -164,19 +163,19 @@ Find your coordinates at [latlong.net](https://www.latlong.net/) and set `WEATHE
 ```
 Strava API
     ↓
-strava_client.py      → OAuth token refresh + fetch activities/members
+src/strava_client.py      → OAuth token refresh + fetch activities/members
     ↓
-report_generator.py   → Compute 20+ statistics, awards, leaderboard
+src/report_generator.py   → Compute 20+ statistics, awards, leaderboard
     ↓
-generate.py           → Inject data into HTML template
+src/generate.py           → Inject data into HTML template
     ↓
-dashboard/index.html  → Static file, open in any browser
-dashboard/history/    → Weekly JSON snapshots (auto-archived)
+index.html                → Static file, open in any browser
+src/ledger.json / ledger-clean.json → activity log (source of truth)
 ```
 
 **Key design decisions:**
 - **No server needed** — generates a single static HTML file
-- **No database** — weekly history stored as JSON files
+- **No database** — every activity ever fetched is appended to `src/ledger.json`, deduped into `src/ledger-clean.json`. History (per-date leaderboards) is computed on the fly from this ledger at generation time, not stored as separate snapshot files
 - **E-bike fair play** — awards exclude e-bike rides (tracked separately)
 - **Rate limit friendly** — uses ~4 API calls per run (Strava allows 1000/day)
 
@@ -185,16 +184,21 @@ dashboard/history/    → Weekly JSON snapshots (auto-archived)
 ## File Structure
 
 ```
-├── generate.py           # Main script — generates the dashboard
-├── strava_client.py      # Strava API client (OAuth + data fetch)
-├── report_generator.py   # Statistics engine (all computations)
-├── config.py             # Configuration from .env
-├── setup_strava.py       # One-time OAuth setup wizard
+├── index.html             # OUTPUT — the dashboard (don't edit manually!)
+├── src/
+│   ├── generate.py           # Main script — generates the dashboard
+│   ├── strava_client.py      # Strava API client (OAuth + data fetch)
+│   ├── report_generator.py   # Statistics engine (all computations)
+│   ├── config.py             # Configuration from .env
+│   ├── setup_strava.py       # One-time OAuth setup wizard
+│   ├── nominal_roll.csv      # Name/unit/company roster
+│   ├── ledger.json           # OUTPUT — raw activity log (source of truth)
+│   └── ledger-clean.json     # OUTPUT — deduped activity log, used for all stats
+├── test/
+│   ├── test_build_grouped_data.py
+│   └── test_ledger.py
 ├── requirements.txt      # Python dependencies
 ├── env.example           # Example .env file
-├── dashboard/            # OUTPUT — generated files
-│   ├── index.html        # The dashboard (don't edit manually!)
-│   └── history/          # Weekly JSON snapshots
 └── .github/workflows/
     └── update.yml        # Hourly auto-update via GitHub Actions
 ```
@@ -215,7 +219,7 @@ dashboard/history/    → Weekly JSON snapshots (auto-archived)
 → You haven't added the required GitHub Secrets yet. See [Set Up GitHub Secrets](#set-up-github-secrets-required) above.
 
 **"STRAVA AUTH ERROR: refresh token is likely expired"**
-→ Run `python3 setup_strava.py` again to get a new token. Then update the `STRAVA_REFRESH_TOKEN` secret in your repo settings.
+→ Run `python3 src/setup_strava.py` again to get a new token. Then update the `STRAVA_REFRESH_TOKEN` secret in your repo settings.
 
 **"ERROR: Missing required config"**
 → One or more required secrets are missing. Check that `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN`, and `STRAVA_CLUB_ID` are all set in your repo's GitHub Secrets.

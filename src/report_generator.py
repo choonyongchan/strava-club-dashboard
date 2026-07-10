@@ -1,5 +1,4 @@
 """Statistics computation engine for Strava club activities."""
-from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 

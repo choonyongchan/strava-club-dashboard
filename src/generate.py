@@ -1,13 +1,13 @@
 """
-Generate a static dashboard/index.html from current Strava club data.
+Generate a static index.html from current Strava club data.
 Run locally or via GitHub Actions (hourly cron).
 
 Usage:
-  python3 generate.py
+  python3 src/generate.py
 """
-import os, json, math, csv
+import json, math, csv
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1075,36 +1075,24 @@ showLeaderboard();
 # Generation
 # ---------------------------------------------------------------------------
 
-def save_daily_snapshot(date_str: str, label: str, group_data: dict):
-    daily_dir = Path(__file__).parent / "dashboard" / "history" / "daily"
-    daily_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"date": date_str, "label": label, **group_data}
-    (daily_dir / f"{date_str}.json").write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+def build_daily_history(clean_ledger: list, members: list, name_map: dict = None, uc_map: dict = None) -> dict:
+    """Derive {date: {date, label, all, nsf, nsmen}} for every date that ever
+    saw a new ledger entry, by re-running build_grouped_data() against the
+    ledger cumulative up to and including that date.
 
-
-def load_daily_snapshots() -> dict:
-    daily_dir = Path(__file__).parent / "dashboard" / "history" / "daily"
-    if not daily_dir.exists():
-        return {}
+    clean_ledger has no per-activity date (Strava's club feed doesn't expose
+    one) — ingested_at (scrape time) is the only timeline signal, and is
+    exactly what "today" is already computed from, so this reproduces every
+    historical date's stats with full fidelity, not just an approximation.
+    """
+    dates = sorted({a["ingested_at"][:10] for a in clean_ledger if a.get("ingested_at")})
     result = {}
-    for f in sorted(daily_dir.glob("*.json")):
-        try:
-            obj = json.loads(f.read_text(encoding="utf-8"))
-            if not {"all", "nsf", "nsmen"} <= obj.keys():
-                # ponytail: pre-group-tabs snapshot (flat, or partial {"all": ...} only) —
-                # keep/derive the 'all' bucket, synthesize empty nsf/nsmen
-                label = obj.get("label")
-                all_stats = obj["all"] if "all" in obj else {k: v for k, v in obj.items() if k not in ("date", "label")}
-                obj = {
-                    "date": obj["date"], "label": label,
-                    "all": all_stats,
-                    "nsf": {"label": label, "count": 0},
-                    "nsmen": {"label": label, "count": 0},
-                }
-            result[obj["date"]] = obj
-        except Exception:
-            pass
+    for date_str in dates:
+        subset = [a for a in clean_ledger if a.get("ingested_at", "")[:10] <= date_str]
+        y, m, d = (int(p) for p in date_str.split("-"))
+        label = f"{d}.{m}.{y}"
+        result[date_str] = {"date": date_str, "label": label,
+                             **build_grouped_data(subset, members, label, name_map, uc_map)}
     return result
 
 
@@ -1121,7 +1109,7 @@ def make_json_safe(stats: dict) -> dict:
     return fix(stats)
 
 
-LEDGER_PATH = Path(__file__).parent / "dashboard" / "history" / "ledger.json"
+LEDGER_PATH = Path(__file__).parent / "ledger.json"
 
 # ponytail: no activity id/timestamp in Strava's club feed, so new entries are
 # found by anchoring on the ledger's 3 most-recent entries inside the fresh
@@ -1178,7 +1166,7 @@ def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
     return stamped + ledger, anchor_missed
 
 
-CLEAN_LEDGER_PATH = Path(__file__).parent / "dashboard" / "history" / "ledger-clean.json"
+CLEAN_LEDGER_PATH = Path(__file__).parent / "ledger-clean.json"
 
 
 def _same_upload_batch(a: dict, b: dict) -> bool:
@@ -1241,15 +1229,13 @@ def generate():
         clean_ledger = dedup_consecutive(full_ledger)
     save_ledger(CLEAN_LEDGER_PATH, clean_ledger)
 
-    date_str = now_dt.strftime("%Y-%m-%d")
     name_map, uc_map = load_nominal_roll()
 
     date_label = f"{now_dt.day}.{now_dt.month}.{now_dt.year}"
     # clean_ledger entries are all ingested_at <= now, so this *is* the
     # cumulative-to-date total — no per-week/per-day filtering needed.
     today_data = build_grouped_data(clean_ledger, members, date_label, name_map, uc_map)
-    save_daily_snapshot(date_str, date_label, today_data)
-    daily_snapshots = load_daily_snapshots()
+    daily_snapshots = build_daily_history(clean_ledger, members, name_map, uc_map)
 
     data = {"today": today_data}
 
@@ -1281,9 +1267,7 @@ def generate():
     html = html.replace("__CLUB_SHORT__", club_short)
     html = html.replace("__CLUB_ID__", config.STRAVA_CLUB_ID)
 
-    out_dir = Path(__file__).parent / "dashboard"
-    out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / "index.html"
+    out_path = Path(__file__).parent.parent / "index.html"
     out_path.write_text(html, encoding="utf-8")
 
     w = data["today"]["all"]
