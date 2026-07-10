@@ -29,39 +29,32 @@ def _all_truncations(strava_name: str):
         prefix = " ".join(parts[:i])
         yield f"{prefix} {parts[i][0]}."
 
-def load_unit_company_map(path=None) -> dict:
-    """Returns {FULL_NAME: {unit, company}} from nominal_roll.csv"""
+def load_nominal_roll(path=None) -> tuple:
+    """Returns (name_map, unit_company_map) from a single read of nominal_roll.csv.
+
+    name_map: {truncated_strava_name: FULL_NAME}
+    unit_company_map: {FULL_NAME: {unit, company}}
+    """
     if path is None:
         path = Path(__file__).parent / "nominal_roll.csv"
-    result = {}
+    name_map = {}
+    unit_company_map = {}
     try:
         with open(path, newline="", encoding="utf-8-sig") as f:
             for row in csv.DictReader(f):
+                strava = row.get("STRAVA username", "").strip()
                 full = row.get("Name", "").strip()
+                if strava and full:
+                    for key in _all_truncations(strava):
+                        name_map[key] = full
                 if full:
-                    result[full] = {
+                    unit_company_map[full] = {
                         "unit":    row.get("Unit", "").strip(),
                         "company": row.get("Company", "").strip(),
                     }
     except FileNotFoundError:
         pass
-    return result
-
-def load_name_map(path=None) -> dict:
-    if path is None:
-        path = Path(__file__).parent / "nominal_roll.csv"
-    name_map = {}
-    try:
-        with open(path, newline="", encoding="utf-8-sig") as f:
-            for row in csv.DictReader(f):
-                strava = row.get("STRAVA username", "").strip()
-                full  = row.get("Name", "").strip()
-                if strava and full:
-                    for key in _all_truncations(strava):
-                        name_map[key] = full
-    except FileNotFoundError:
-        pass
-    return name_map
+    return name_map, unit_company_map
 
 # ---------------------------------------------------------------------------
 # Weather — Open-Meteo (no API key needed)
@@ -790,10 +783,9 @@ function render() {
   document.getElementById('fun-section').style.display = funHtml.trim() ? '' : 'none';
 
   const devs = data.device_stats || [];
-  const devMedals = ['🥇','🥈','🥉'];
   const DEVS_SHOW = 3;
   function devChip(d, i, hidden) {
-    const icon = devMedals[i] || `<span style="color:#ccc;font-size:.75rem;min-width:18px;text-align:center">${i+1}</span>`;
+    const icon = MEDALS[i] || `<span style="color:#ccc;font-size:.75rem;min-width:18px;text-align:center">${i+1}</span>`;
     return `<div class="dev-chip${hidden?' dev-hidden':''}">${icon} <strong>${esc(d.device)}</strong><span style="color:#FC4C02;font-weight:700;margin-left:4px">${d.count}×</span></div>`;
   }
   const extraDevs = devs.slice(DEVS_SHOW);
@@ -1097,6 +1089,31 @@ def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
     return stamped + ledger, anchor_missed
 
 
+CLEAN_LEDGER_PATH = Path(__file__).parent / "dashboard" / "history" / "ledger-clean.json"
+
+
+def _same_upload_batch(a: dict, b: dict) -> bool:
+    aa, bb = a.get("athlete") or {}, b.get("athlete") or {}
+    return (a.get("ingested_at") == b.get("ingested_at")
+            and aa.get("firstname") == bb.get("firstname")
+            and aa.get("lastname") == bb.get("lastname"))
+
+
+def dedup_consecutive(entries: list) -> list:
+    """Collapse runs of *consecutive* same-athlete activities ingested in the
+    same batch (e.g. multiple runs uploaded together) into the single
+    longest-distance entry, preserving order."""
+    result, group = [], []
+    for act in entries:
+        if group and not _same_upload_batch(group[-1], act):
+            result.append(max(group, key=lambda a: a.get("distance") or 0))
+            group = []
+        group.append(act)
+    if group:
+        result.append(max(group, key=lambda a: a.get("distance") or 0))
+    return result
+
+
 def load_ledger(path: Path) -> list:
     if not path.exists():
         return []
@@ -1128,14 +1145,20 @@ def generate():
     print(f"  {new_count} new activities appended to ledger.")
     save_ledger(LEDGER_PATH, full_ledger)
 
+    if CLEAN_LEDGER_PATH.exists():
+        clean_ledger = dedup_consecutive(full_ledger[:new_count]) + load_ledger(CLEAN_LEDGER_PATH)
+    else:
+        # bootstrap: no prior clean ledger, dedup the whole history at once
+        clean_ledger = dedup_consecutive(full_ledger)
+    save_ledger(CLEAN_LEDGER_PATH, clean_ledger)
+
     date_str = now_dt.strftime("%Y-%m-%d")
-    name_map = load_name_map()
-    uc_map   = load_unit_company_map()
+    name_map, uc_map = load_nominal_roll()
 
     date_label = f"{now_dt.day}.{now_dt.month}.{now_dt.year}"
-    # full_ledger entries are all ingested_at <= now, so this *is* the
+    # clean_ledger entries are all ingested_at <= now, so this *is* the
     # cumulative-to-date total — no per-week/per-day filtering needed.
-    today_data = build_week_data(full_ledger, members, date_label, name_map, uc_map)
+    today_data = build_week_data(clean_ledger, members, date_label, name_map, uc_map)
     save_daily_snapshot(date_str, date_label, today_data)
     daily_snapshots = load_daily_snapshots()
 
