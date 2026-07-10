@@ -19,6 +19,9 @@ import strava_client, report_generator
 # Nominal roll — maps Strava truncated names to full formal names
 # ---------------------------------------------------------------------------
 
+# Which units belong to which dashboard group tab.
+UNIT_GROUPS = {"nsf": {"40SAR"}, "nsmen": {"41SAR", "8SAB"}}
+
 def _all_truncations(strava_name: str):
     """Yield every possible API-truncated form by splitting at each word boundary."""
     parts = strava_name.lower().split()
@@ -115,11 +118,35 @@ def now_label() -> tuple:
     return iso, human
 
 
-def build_week_data(acts: list, members: list, label: str, name_map: dict = None, uc_map: dict = None) -> dict:
-    s = report_generator.compute_stats(acts, members=members, name_map=name_map, uc_map=uc_map)
-    s["label"] = label
-    s["count"] = len(acts)
-    return make_json_safe(s)
+def _resolve_name(raw_name: str, name_map: dict = None) -> str:
+    return name_map.get(raw_name.lower().strip(), raw_name) if name_map else raw_name
+
+
+def build_grouped_data(acts: list, members: list, label: str, name_map: dict = None, uc_map: dict = None) -> dict:
+    """Split acts/members by UNIT_GROUPS, returning {'all': stats, 'nsf': stats, 'nsmen': stats}."""
+    def unit_of(name):
+        return (uc_map or {}).get(name, {}).get("unit", "")
+
+    def act_name(a):
+        ath = a.get("athlete", {})
+        return _resolve_name(f"{ath.get('firstname', '?')} {ath.get('lastname', '')}".strip(), name_map)
+
+    def member_name(m):
+        return _resolve_name(f"{m.get('firstname', '')} {m.get('lastname', '')}".strip(), name_map)
+
+    def stats_for(filtered_acts, filtered_members):
+        s = report_generator.compute_stats(filtered_acts, members=filtered_members, name_map=name_map, uc_map=uc_map)
+        s["label"] = label
+        s["count"] = len(filtered_acts)
+        return make_json_safe(s)
+
+    result = {"all": stats_for(acts, members)}
+    for group, units in UNIT_GROUPS.items():
+        result[group] = stats_for(
+            [a for a in acts if unit_of(act_name(a)) in units],
+            [m for m in (members or []) if unit_of(member_name(m)) in units],
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1064,6 +1091,17 @@ def load_daily_snapshots() -> dict:
     for f in sorted(daily_dir.glob("*.json")):
         try:
             obj = json.loads(f.read_text(encoding="utf-8"))
+            if not {"all", "nsf", "nsmen"} <= obj.keys():
+                # ponytail: pre-group-tabs snapshot (flat, or partial {"all": ...} only) —
+                # keep/derive the 'all' bucket, synthesize empty nsf/nsmen
+                label = obj.get("label")
+                all_stats = obj["all"] if "all" in obj else {k: v for k, v in obj.items() if k not in ("date", "label")}
+                obj = {
+                    "date": obj["date"], "label": label,
+                    "all": all_stats,
+                    "nsf": {"label": label, "count": 0},
+                    "nsmen": {"label": label, "count": 0},
+                }
             result[obj["date"]] = obj
         except Exception:
             pass
@@ -1209,11 +1247,11 @@ def generate():
     date_label = f"{now_dt.day}.{now_dt.month}.{now_dt.year}"
     # clean_ledger entries are all ingested_at <= now, so this *is* the
     # cumulative-to-date total — no per-week/per-day filtering needed.
-    today_data = build_week_data(clean_ledger, members, date_label, name_map, uc_map)
+    today_data = build_grouped_data(clean_ledger, members, date_label, name_map, uc_map)
     save_daily_snapshot(date_str, date_label, today_data)
     daily_snapshots = load_daily_snapshots()
 
-    data = {"today": group_data}
+    data = {"today": today_data}
 
     _, human_label = now_label()
 
@@ -1248,7 +1286,7 @@ def generate():
     out_path = out_dir / "index.html"
     out_path.write_text(html, encoding="utf-8")
 
-    w = data["today"]
+    w = data["today"]["all"]
     print(f"Generated: {out_path}")
     print(f"  Cumulative: {w.get('count', 0)} activities, {w.get('athlete_count', 0)} runners")
 
