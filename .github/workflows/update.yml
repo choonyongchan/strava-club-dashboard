@@ -49,9 +49,8 @@ jobs:
           commit_user_name: github-actions[bot]
           commit_user_email: github-actions[bot]@users.noreply.github.com
           commit_message: '🏃 Dashboard update ${{ github.run_id }}'
-          file_pattern: 'index.html,src/ledger.json,src/ledger-clean.json'
+          file_pattern: 'index.html src/ledger.json src/ledger-clean.json'
           branch: main
-          push: true
 
   deploy:
     needs: generate
