@@ -571,8 +571,8 @@ thead th.sort-desc::after { content: ' ↓'; opacity: 1 !important; color: #FC4C
 
   <div class="group-tabs">
     <button class="group-tab active" onclick="setGroup('all', this)">All</button>
-    <button class="group-tab" onclick="setGroup('nsf', this)">NSF (test)</button>
-    <button class="group-tab" onclick="setGroup('nsmen', this)">NSMen (test)</button>
+    <button class="group-tab" onclick="setGroup('nsf', this)">NSF (test: 40SAR)</button>
+    <button class="group-tab" onclick="setGroup('nsmen', this)">NSMen (test: 41SAB, 8SAB)</button>
   </div>
   <div class="breadcrumb" id="breadcrumb"></div>
 
@@ -696,7 +696,7 @@ let filterCompany      = '';
 let currentGroup       = 'all';
 let currentSub         = 'leaderboard';
 
-const GROUP_LABELS = { all: 'All', nsf: 'NSF (test)', nsmen: 'NSMen (test)' };
+const GROUP_LABELS = { all: 'All', nsf: 'NSF (test: 40SAR)', nsmen: 'NSMen (test: 41SAB, 8SAB)' };
 const SUB_LABELS    = { leaderboard: 'Leaderboard', '7days': 'Last Week', history: 'History' };
 
 function fmtTime(s) {
