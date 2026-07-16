@@ -54,9 +54,10 @@ def test_anchor_missing_falls_back_to_full_append():
     assert [m["athlete"]["firstname"] for m in merged[:2]] == ["New1", "New2"]
 
 
-def test_anchor_missing_does_not_duplicate_known_activities():
-    # e.g. an anchored activity was edited/deleted on Strava, breaking the
-    # anchor match, even though most of the fresh fetch overlaps the ledger.
+def test_anchor_tolerates_one_mutated_entry():
+    # A was edited/reprocessed on Strava (elevation correction etc.), breaking
+    # its key, but enough of the other recent entries still match — anchor
+    # should still be found rather than falling back to a full append.
     ledger = [
         {**act("C"), "ingested_at": "T0"},
         {**act("B"), "ingested_at": "T0"},
@@ -64,8 +65,24 @@ def test_anchor_missing_does_not_duplicate_known_activities():
     ]
     fresh = [act("New1"), act("New2"), act("C"), act("B")]  # A deleted/edited on Strava
     merged, missed = merge_ledger(ledger, fresh, "T1")
-    assert missed
+    assert not missed
     assert len(merged) == 5  # New1, New2 + C, B, A once each — not duplicated
+    assert [m["athlete"]["firstname"] for m in merged] == ["New1", "New2", "C", "B", "A"]
+
+
+def test_anchor_missing_below_required_matches_does_not_duplicate():
+    # Only one of the last 3 ledger entries still matches — below the
+    # ANCHOR_MIN_MATCHES threshold, so the anchor is still considered missed,
+    # but dedup must still prevent the matching entry from being duplicated.
+    ledger = [
+        {**act("C"), "ingested_at": "T0"},
+        {**act("B"), "ingested_at": "T0"},
+        {**act("A"), "ingested_at": "T0"},
+    ]
+    fresh = [act("New1"), act("New2"), act("C")]  # B and A deleted/edited on Strava
+    merged, missed = merge_ledger(ledger, fresh, "T1")
+    assert missed
+    assert len(merged) == 5  # New1, New2, C once each, plus existing B, A
     assert [m["athlete"]["firstname"] for m in merged] == ["New1", "New2", "C", "B", "A"]
 
 
@@ -99,7 +116,8 @@ if __name__ == "__main__":
     test_empty_ledger_bootstraps_everything()
     test_anchor_found_appends_only_new()
     test_anchor_missing_falls_back_to_full_append()
-    test_anchor_missing_does_not_duplicate_known_activities()
+    test_anchor_tolerates_one_mutated_entry()
+    test_anchor_missing_below_required_matches_does_not_duplicate()
     test_dedup_consecutive_collapses_same_batch_same_athlete()
     test_dedup_consecutive_keeps_separate_batches_and_athletes()
     test_dedup_consecutive_requires_adjacency_not_just_same_batch()

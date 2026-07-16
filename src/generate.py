@@ -1112,9 +1112,17 @@ def make_json_safe(stats: dict) -> dict:
 LEDGER_PATH = Path(__file__).parent / "ledger.json"
 
 # ponytail: no activity id/timestamp in Strava's club feed, so new entries are
-# found by anchoring on the ledger's 3 most-recent entries inside the fresh
-# fetch. Anchor missing (>197 new activities in an hour, or an anchored
-# activity edited/deleted) -> append everything, accept occasional double-count.
+# found by anchoring on the ledger's recent entries inside the fresh fetch.
+# Strava can revise a logged activity's own fields after the fact (elevation
+# correction, auto-pause recalculation), so a single mutated entry shouldn't
+# sink the whole anchor: match each of the last ANCHOR_WINDOW ledger entries
+# independently and require only ANCHOR_MIN_MATCHES of them to be found.
+# Anchor still misses if too few match (>197 new activities in an hour, or
+# multiple anchored activities edited/deleted) -> append everything, accept
+# occasional double-count.
+ANCHOR_WINDOW = 8
+ANCHOR_MIN_MATCHES = 2
+
 
 def _activity_key(act: dict) -> tuple:
     athlete = act.get("athlete") or {}
@@ -1136,28 +1144,35 @@ def merge_ledger(ledger: list, fresh: list, now_iso: str) -> tuple:
 
     The anchor match is only a fast path for finding new activities — Strava's
     club feed has no activity id/timestamp, so the anchor can legitimately miss
-    (>197 new activities in an hour, or an anchored activity edited/deleted).
-    Content-key dedup below is the actual correctness guarantee: it runs
-    unconditionally, so a missed or stale anchor can degrade to "append
-    everything" but can never reintroduce an activity already in the ledger.
+    (>197 new activities in an hour, or too many anchored activities
+    edited/deleted). Content-key dedup below is the actual correctness
+    guarantee: it runs unconditionally, so a missed or stale anchor can
+    degrade to "append everything" but can never reintroduce an activity
+    already in the ledger.
     """
     if not ledger:
         new_entries, anchor_missed = fresh, False
         print("  Ledger empty — no anchor to match, treating full fetch as new.")
     else:
-        anchor = [_activity_key(a) for a in ledger[:3]]
-        n = len(anchor)
-        match_at = next(
-            (i for i in range(len(fresh) - n + 1)
-             if [_activity_key(a) for a in fresh[i:i + n]] == anchor),
-            None,
-        )
-        new_entries = fresh if match_at is None else fresh[:match_at]
-        anchor_missed = match_at is None
+        candidates = ledger[:ANCHOR_WINDOW]
+        fresh_index = {}
+        for i, a in enumerate(fresh):
+            fresh_index.setdefault(_activity_key(a), i)
+
+        matched_at = [fresh_index[_activity_key(a)] for a in candidates
+                      if _activity_key(a) in fresh_index]
+        required = min(ANCHOR_MIN_MATCHES, len(candidates))
+        anchor_missed = len(matched_at) < required
+
         if anchor_missed:
-            print(f"  Anchor NOT found: {anchor}")
+            new_entries = fresh
+            print(f"  Anchor NOT found: only {len(matched_at)}/{required} of last "
+                  f"{len(candidates)} ledger entries matched in fresh fetch.")
         else:
-            print(f"  Anchor found at fresh[{match_at}:{match_at + n}]: {anchor}")
+            cut_at = min(matched_at)
+            new_entries = fresh[:cut_at]
+            print(f"  Anchor found: {len(matched_at)}/{len(candidates)} of last "
+                  f"{len(candidates)} ledger entries matched, cutting at fresh[{cut_at}].")
 
     existing_keys = {_activity_key(a) for a in ledger}
     new_entries = [a for a in new_entries if _activity_key(a) not in existing_keys]
